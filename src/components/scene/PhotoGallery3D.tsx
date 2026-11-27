@@ -269,6 +269,8 @@ export function PhotoGallery3D({
     new Map()
   );
   const pinchLatchedRef = useRef(false);
+  const lastPinchAtRef = useRef(0);
+  const openHoldSinceRef = useRef<number | null>(null);
   const cycleIndexRef = useRef(0);
 
   // Reusable math temporaries to avoid per-frame allocations
@@ -335,20 +337,38 @@ export function PhotoGallery3D({
     const time = state.clock.getElapsedTime();
     const hand = handDataRef.current;
 
-    // Camera gesture PINCH edge detection -> cycle to next Polaroid
+    // Camera gesture PINCH edge detection -> cycle to next Polaroid (with anti-double-trigger cooldown)
     if (hand.source === 'camera') {
-      if (hand.gesture === 'PINCH' && !pinchLatchedRef.current && placements.length > 0) {
-        pinchLatchedRef.current = true;
-        const nextIdx = cycleIndexRef.current % placements.length;
-        cycleIndexRef.current = (nextIdx + 1) % placements.length;
-        onSelectPhoto(placements[nextIdx].photo.id);
-      } else if (hand.gesture !== 'PINCH') {
+      const nowMs = performance.now();
+      if (hand.gesture === 'PINCH') {
+        openHoldSinceRef.current = null;
+        if (
+          !pinchLatchedRef.current &&
+          placements.length > 0 &&
+          nowMs - lastPinchAtRef.current > 450
+        ) {
+          pinchLatchedRef.current = true;
+          lastPinchAtRef.current = nowMs;
+          const nextIdx = cycleIndexRef.current % placements.length;
+          cycleIndexRef.current = (nextIdx + 1) % placements.length;
+          onSelectPhoto(placements[nextIdx].photo.id);
+        }
+      } else {
         pinchLatchedRef.current = false;
-      }
 
-      // Opening palm dismisses focused photo cleanly so the full bloom is unobstructed
-      if (hand.gesture === 'OPEN' && focusedPhotoId !== null) {
-        onSelectPhoto(null);
+        // Require intentional sustained open palm (not just releasing a pinch!) to dismiss focused photo
+        if (hand.gesture === 'OPEN' && focusedPhotoId !== null) {
+          if (nowMs - lastPinchAtRef.current > 900) {
+            if (openHoldSinceRef.current === null) {
+              openHoldSinceRef.current = nowMs;
+            } else if (nowMs - openHoldSinceRef.current > 420) {
+              openHoldSinceRef.current = null;
+              onSelectPhoto(null);
+            }
+          }
+        } else {
+          openHoldSinceRef.current = null;
+        }
       }
     }
 

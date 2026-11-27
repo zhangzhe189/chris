@@ -43,6 +43,14 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
 
 const FINGERTIP_INDICES = [4, 8, 12, 16, 20];
 
+// [mcp, pip, tip] indices for Index, Middle, Ring, Pinky
+const FOUR_FINGERS: Array<[number, number, number]> = [
+  [5, 6, 8],
+  [9, 10, 12],
+  [13, 14, 16],
+  [17, 18, 20],
+];
+
 function loadScriptOnce(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
@@ -66,20 +74,39 @@ function loadScriptOnce(src: string): Promise<void> {
   });
 }
 
+function distAspect(a: Landmark, b: Landmark, aspect: number): number {
+  const dx = (a.x - b.x) * aspect;
+  const dy = a.y - b.y;
+  return Math.hypot(dx, dy);
+}
+
 interface HandTrackerProps {
   onHandUpdate: (data: HandData) => void;
   accentColor: string;
 }
 
+const GESTURE_LABEL: Record<GestureType, string> = {
+  IDLE: '请将手放入画面',
+  HOVER: '握拳 · 聚拢',
+  OPEN: '张掌 · 绽放',
+  PINCH: '捏合 · 切图',
+};
+
 export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const onHandUpdateRef = useRef(onHandUpdate);
+
+  // Hysteresis & smoothing refs
   const isPinchedRef = useRef(false);
+  const isOpenRef = useRef(false);
+  const missedFramesRef = useRef(0);
+  const smoothPosRef = useRef({ x: 0.5, y: 0.5 });
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorText, setErrorText] = useState('摄像头不可用');
   const [previewExpanded, setPreviewExpanded] = useState(true);
+  const [detectedGesture, setDetectedGesture] = useState<GestureType>('IDLE');
 
   onHandUpdateRef.current = onHandUpdate;
 
@@ -87,7 +114,7 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
     let cancelled = false;
     let stream: MediaStream | null = null;
     let hands: MediaPipeHandsInstance | null = null;
-    let timerId: number | null = null;
+    let rafId: number | null = null;
 
     const handleResults = (results: HandsResults) => {
       if (cancelled) return;
@@ -95,6 +122,99 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
       const video = videoRef.current;
       const landmarks = results.multiHandLandmarks?.[0];
 
+      const vw = video?.videoWidth || 640;
+      const vh = video?.videoHeight || 480;
+      const aspect = vw / Math.max(1, vh);
+
+      if (!landmarks) {
+        missedFramesRef.current += 1;
+        // Clear skeleton immediately when hand leaves frame
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        // Hold previous gesture briefly (3 frames ~100ms) to avoid jitter on rapid movement
+        if (missedFramesRef.current < 4) return;
+
+        isPinchedRef.current = false;
+        isOpenRef.current = false;
+        setDetectedGesture((prev) => (prev === 'IDLE' ? prev : 'IDLE'));
+        onHandUpdateRef.current({
+          x: smoothPosRef.current.x,
+          y: smoothPosRef.current.y,
+          gesture: 'IDLE',
+          isPresent: false,
+          source: 'camera',
+        });
+        return;
+      }
+
+      missedFramesRef.current = 0;
+
+      const wrist = landmarks[0];
+      const indexMcp = landmarks[5];
+      const middleMcp = landmarks[9];
+      const pinkyMcp = landmarks[17];
+      const thumbTip = landmarks[4];
+      const indexTip = landmarks[8];
+      const indexPip = landmarks[6];
+
+      // Robust palm reference (combines length & width so tilted hands stay accurate)
+      const palmLen = distAspect(wrist, middleMcp, aspect);
+      const palmWidth = distAspect(indexMcp, pinkyMcp, aspect);
+      const palmScale = Math.max(0.04, palmLen, palmWidth * 1.15);
+
+      // Count extended non-thumb fingers by comparing tip vs PIP distance from wrist
+      let extendedFourCount = 0;
+      let otherExtendedCount = 0; // middle, ring, pinky
+      for (let f = 0; f < FOUR_FINGERS.length; f++) {
+        const [mcpIdx, pipIdx, tipIdx] = FOUR_FINGERS[f];
+        const tipToWrist = distAspect(landmarks[tipIdx], wrist, aspect);
+        const pipToWrist = distAspect(landmarks[pipIdx], wrist, aspect);
+        const tipToMcp = distAspect(landmarks[tipIdx], landmarks[mcpIdx], aspect);
+
+        const isExtended = tipToWrist > pipToWrist * 1.09 && tipToMcp > palmScale * 0.44;
+        if (isExtended) {
+          extendedFourCount += 1;
+          if (f > 0) otherExtendedCount += 1;
+        }
+      }
+
+      // Distinguish true fist from thumb+index pinch
+      const indexTipToWrist = distAspect(indexTip, wrist, aspect);
+      const indexPipToWrist = distAspect(indexPip, wrist, aspect);
+      const isFist =
+        extendedFourCount === 0 &&
+        otherExtendedCount === 0 &&
+        indexTipToWrist < indexPipToWrist * 1.12;
+
+      const pinchRatio = distAspect(thumbTip, indexTip, aspect) / palmScale;
+
+      // Forgiving hysteresis for pinch (never triggers on closed fist)
+      let pinched = isPinchedRef.current;
+      if (isFist) {
+        pinched = false;
+      } else if (pinched) {
+        if (pinchRatio > 0.72) pinched = false;
+      } else if (pinchRatio < 0.54) {
+        pinched = true;
+      }
+      isPinchedRef.current = pinched;
+
+      // Forgiving hysteresis for open palm
+      let openPalm = isOpenRef.current;
+      if (pinched) {
+        openPalm = false;
+      } else if (openPalm) {
+        if (extendedFourCount <= 1) openPalm = false;
+      } else if (extendedFourCount >= 3) {
+        openPalm = true;
+      }
+      isOpenRef.current = openPalm;
+
+      const gesture: GestureType = pinched ? 'PINCH' : openPalm ? 'OPEN' : 'HOVER';
+
+      // Draw mirrored skeleton overlay with live gesture highlight
       if (canvas && video && video.videoWidth > 0) {
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth;
@@ -103,86 +223,64 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          if (landmarks) {
-            // Draw mirrored skeleton to match mirrored camera video
-            ctx.save();
-            ctx.translate(canvas.width, 0);
-            ctx.scale(-1, 1);
+          ctx.save();
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
 
-            ctx.strokeStyle = 'rgba(255, 217, 138, 0.85)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            for (const [a, b] of HAND_CONNECTIONS) {
-              const p1 = landmarks[a];
-              const p2 = landmarks[b];
-              ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
-              ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
-            }
-            ctx.stroke();
-
-            for (let i = 0; i < landmarks.length; i++) {
-              const pt = landmarks[i];
-              ctx.fillStyle = FINGERTIP_INDICES.includes(i) ? '#ff5964' : '#ffffff';
-              ctx.beginPath();
-              ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 3, 0, Math.PI * 2);
-              ctx.fill();
-            }
-            ctx.restore();
+          ctx.strokeStyle =
+            gesture === 'PINCH'
+              ? 'rgba(255, 107, 120, 0.92)'
+              : gesture === 'OPEN'
+                ? 'rgba(255, 224, 140, 0.95)'
+                : 'rgba(130, 230, 185, 0.85)';
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          for (const [a, b] of HAND_CONNECTIONS) {
+            const p1 = landmarks[a];
+            const p2 = landmarks[b];
+            ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
+            ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
           }
+          ctx.stroke();
+
+          // Visual pinch bridge between thumb & index tips when pinching
+          if (gesture === 'PINCH') {
+            ctx.strokeStyle = '#ff4d6d';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(thumbTip.x * canvas.width, thumbTip.y * canvas.height);
+            ctx.lineTo(indexTip.x * canvas.width, indexTip.y * canvas.height);
+            ctx.stroke();
+          }
+
+          for (let i = 0; i < landmarks.length; i++) {
+            const pt = landmarks[i];
+            const isTip = FINGERTIP_INDICES.includes(i);
+            ctx.fillStyle = isTip
+              ? gesture === 'PINCH' && (i === 4 || i === 8)
+                ? '#ff4d6d'
+                : '#ffd98a'
+              : '#ffffff';
+            ctx.beginPath();
+            ctx.arc(pt.x * canvas.width, pt.y * canvas.height, isTip ? 4.2 : 2.6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
         }
       }
 
-      if (!landmarks) {
-        isPinchedRef.current = false;
-        onHandUpdateRef.current({
-          x: 0.5,
-          y: 0.5,
-          gesture: 'IDLE',
-          isPresent: false,
-          source: 'camera',
-        });
-        return;
-      }
+      // Smooth pointer coordinates (EMA) to eliminate reticle jitter
+      const rawX = 1 - (indexTip.x + thumbTip.x) * 0.5;
+      const rawY = (indexTip.y + thumbTip.y) * 0.5;
+      const alpha = 0.45;
+      smoothPosRef.current.x += (rawX - smoothPosRef.current.x) * alpha;
+      smoothPosRef.current.y += (rawY - smoothPosRef.current.y) * alpha;
 
-      const wrist = landmarks[0];
-      const middleMcp = landmarks[9];
-      const thumbTip = landmarks[4];
-      const indexTip = landmarks[8];
-
-      // Distance-invariant normalization using palm length
-      const palmSize = Math.max(
-        0.05,
-        Math.hypot(middleMcp.x - wrist.x, middleMcp.y - wrist.y)
-      );
-
-      let tipDistSum = 0;
-      for (const idx of FINGERTIP_INDICES) {
-        tipDistSum += Math.hypot(landmarks[idx].x - wrist.x, landmarks[idx].y - wrist.y);
-      }
-      const spreadRatio = tipDistSum / 5 / palmSize;
-      const pinchRatio = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y) / palmSize;
-
-      // Hysteresis thresholds to prevent jitter
-      let pinched = isPinchedRef.current;
-      if (pinched) {
-        if (pinchRatio > 0.62) pinched = false;
-      } else if (pinchRatio < 0.42) {
-        pinched = true;
-      }
-      isPinchedRef.current = pinched;
-
-      let gesture: GestureType = 'HOVER';
-      if (pinched) {
-        gesture = 'PINCH';
-      } else if (spreadRatio > 1.52) {
-        gesture = 'OPEN';
-      } else {
-        gesture = 'HOVER';
-      }
+      setDetectedGesture((prev) => (prev === gesture ? prev : gesture));
 
       onHandUpdateRef.current({
-        x: 1 - indexTip.x,
-        y: indexTip.y,
+        x: smoothPosRef.current.x,
+        y: smoothPosRef.current.y,
         gesture,
         isPresent: true,
         source: 'camera',
@@ -196,7 +294,12 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
         }
 
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' },
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 30 },
+            facingMode: 'user',
+          },
           audio: false,
         });
         if (cancelled) return;
@@ -216,11 +319,12 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
         hands = new window.Hands({
           locateFile: (file: string) => `./mediapipe/hands/${file}`,
         });
+        // modelComplexity: 0 uses the lightweight high-FPS model (~20-30 FPS in browser WASM)
         hands.setOptions({
           maxNumHands: 1,
-          modelComplexity: 1,
-          minDetectionConfidence: 0.55,
-          minTrackingConfidence: 0.55,
+          modelComplexity: 0,
+          minDetectionConfidence: 0.45,
+          minTrackingConfidence: 0.45,
         });
         hands.onResults(handleResults);
 
@@ -228,20 +332,31 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
 
         let sending = false;
         let lastVideoTime = -1;
-        timerId = window.setInterval(async () => {
-          if (cancelled || sending || !hands || !videoRef.current) return;
+        let lastSentAt = 0;
+
+        const pump = (now: number) => {
+          if (cancelled) return;
+          rafId = window.requestAnimationFrame(pump);
+
           const v = videoRef.current;
-          if (v.paused || v.readyState < 2 || v.currentTime === lastVideoTime) return;
+          if (!v || !hands || sending || v.paused || v.readyState < 2) return;
+          // Target ~25-30 FPS inference without starving WebGL frames
+          if (now - lastSentAt < 34 || v.currentTime === lastVideoTime) return;
+
           lastVideoTime = v.currentTime;
+          lastSentAt = now;
           sending = true;
-          try {
-            await hands.send({ image: v });
-          } catch {
-            // Skip occasional transient frame errors
-          } finally {
-            sending = false;
-          }
-        }, 100);
+          hands
+            .send({ image: v })
+            .catch(() => {
+              // Skip occasional transient frame errors
+            })
+            .finally(() => {
+              sending = false;
+            });
+        };
+
+        rafId = window.requestAnimationFrame(pump);
       } catch (err) {
         if (cancelled) return;
         const msg =
@@ -259,7 +374,7 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
 
     return () => {
       cancelled = true;
-      if (timerId !== null) window.clearInterval(timerId);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
       if (hands) {
         try {
           hands.close();
@@ -284,7 +399,7 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
       <div
         className={`relative overflow-hidden rounded-xl border transition-all duration-300 origin-bottom-right shadow-2xl ${
-          previewExpanded ? 'w-48 h-36 opacity-100' : 'w-0 h-0 opacity-0 pointer-events-none'
+          previewExpanded ? 'w-52 h-40 opacity-100' : 'w-0 h-0 opacity-0 pointer-events-none'
         }`}
         style={{
           background: 'rgba(8, 12, 26, 0.92)',
@@ -306,15 +421,26 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
           playsInline
           muted
           autoPlay
-          className="absolute inset-0 w-full h-full object-cover opacity-65 -scale-x-100"
+          className="absolute inset-0 w-full h-full object-cover opacity-70 -scale-x-100"
         />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
         {status === 'ready' && (
           <div
-            className="absolute bottom-1 right-2 text-[9px] font-mono tracking-wider"
-            style={{ color: accentColor }}
+            className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between px-2 py-0.5 rounded-md text-[10px] font-medium backdrop-blur-md"
+            style={{
+              background: 'rgba(8, 12, 26, 0.72)',
+              color:
+                detectedGesture === 'PINCH'
+                  ? '#ff7a8a'
+                  : detectedGesture === 'OPEN'
+                    ? accentColor
+                    : detectedGesture === 'HOVER'
+                      ? '#7ee8b4'
+                      : 'rgba(255,255,255,0.65)',
+            }}
           >
-            手势识别中
+            <span>{GESTURE_LABEL[detectedGesture]}</span>
+            <span className="text-[8px] opacity-60 font-mono">AI</span>
           </div>
         )}
       </div>
