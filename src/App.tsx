@@ -83,6 +83,12 @@ export function App() {
     customAudioUrl,
   });
 
+  // Sync document title and body void background smoothly with active Appearance
+  useEffect(() => {
+    document.title = `Christmas Wonderland · ${appearance.name}`;
+    document.body.style.backgroundColor = appearance.defaults.bgColor;
+  }, [appearance]);
+
   // Load persisted photos from IndexedDB on mount (never wipes user data)
   useEffect(() => {
     let active = true;
@@ -284,7 +290,7 @@ export function App() {
 
   return (
     <div
-      className="w-full h-screen text-white overflow-hidden relative"
+      className="w-full h-screen text-white overflow-hidden relative transition-colors duration-700"
       style={{ background: config.bgColor }}
     >
       <HudOverlay

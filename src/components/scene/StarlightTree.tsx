@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -13,6 +13,7 @@ interface StarlightTreeProps {
   color1: string;
   color2: string;
   starColor: string;
+  twinkleIntensity?: number;
   bloomActiveRef: MutableRefObject<boolean>;
 }
 
@@ -50,13 +51,25 @@ export function StarlightTree({
   color1,
   color2,
   starColor,
+  twinkleIntensity = 0.24,
   bloomActiveRef,
 }: StarlightTreeProps) {
   const meshRef = useRef<THREE.InstancedMesh | null>(null);
   const starRef = useRef<THREE.Mesh | null>(null);
+  const starMatRef = useRef<THREE.MeshStandardMaterial | null>(null);
   const starLightRef = useRef<THREE.PointLight | null>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const starGeo = useMemo(() => createStarGeometry(), []);
+
+  // Smooth color crossfade refs for Appearance transitions
+  const curC1 = useRef(new THREE.Color(color1));
+  const curC2 = useRef(new THREE.Color(color2));
+  const curStar = useRef(new THREE.Color(starColor));
+  const tgtC1 = useRef(new THREE.Color(color1));
+  const tgtC2 = useRef(new THREE.Color(color2));
+  const tgtStar = useRef(new THREE.Color(starColor));
+  const colorSettledRef = useRef(false);
+  const tempColor = useMemo(() => new THREE.Color(), []);
 
   const data = useMemo(() => {
     const tree = new Float32Array(count * 3);
@@ -130,28 +143,13 @@ export function StarlightTree({
     };
   }, [count]);
 
-  // Apply two-tone HDR instance colors whenever theme/colors or count change
-  useLayoutEffect(() => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    const c1 = new THREE.Color(color1);
-    const c2 = new THREE.Color(color2);
-    const temp = new THREE.Color();
-
-    for (let i = 0; i < count; i++) {
-      const m = data.colorMix[i];
-      if (m < 0.72) {
-        temp.copy(c1).lerp(c2, m * 0.35);
-      } else {
-        temp.copy(c2).lerp(c1, (1 - m) * 0.4);
-      }
-      // Restrained HDR lift for fine cinema-grade sparkle without harsh blowout
-      const lift = 0.94 + (i % 8 === 0 ? 0.38 : 0.1);
-      temp.multiplyScalar(lift);
-      mesh.setColorAt(i, temp);
-    }
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [count, color1, color2, data.colorMix]);
+  // Trigger smooth color crossfade whenever theme/colors or count change
+  useEffect(() => {
+    tgtC1.current.set(color1);
+    tgtC2.current.set(color2);
+    tgtStar.current.set(starColor);
+    colorSettledRef.current = false;
+  }, [count, color1, color2, starColor]);
 
   useFrame((state, rawDelta) => {
     const mesh = meshRef.current;
@@ -163,6 +161,45 @@ export function StarlightTree({
     const bass = audioMetricsRef.current.bassEnergy;
     const isBlooming =
       handDataRef.current.gesture === 'OPEN' || bloomActiveRef.current;
+
+    // Smoothly interpolate particle & star colors during Appearance transitions
+    if (!colorSettledRef.current) {
+      const step = Math.min(1, delta * 4.2);
+      curC1.current.lerp(tgtC1.current, step);
+      curC2.current.lerp(tgtC2.current, step);
+      curStar.current.lerp(tgtStar.current, step);
+
+      for (let i = 0; i < count; i++) {
+        const m = data.colorMix[i];
+        if (m < 0.72) {
+          tempColor.copy(curC1.current).lerp(curC2.current, m * 0.35);
+        } else {
+          tempColor.copy(curC2.current).lerp(curC1.current, (1 - m) * 0.4);
+        }
+        const lift = 0.94 + (i % 8 === 0 ? 0.38 : 0.1);
+        tempColor.multiplyScalar(lift);
+        mesh.setColorAt(i, tempColor);
+      }
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+
+      if (starMatRef.current) {
+        starMatRef.current.color.copy(curStar.current);
+        starMatRef.current.emissive.copy(curStar.current);
+      }
+      if (starLightRef.current) {
+        starLightRef.current.color.copy(curStar.current);
+      }
+
+      const diff =
+        Math.abs(curC1.current.r - tgtC1.current.r) +
+        Math.abs(curC1.current.g - tgtC1.current.g) +
+        Math.abs(curC1.current.b - tgtC1.current.b) +
+        Math.abs(curC2.current.r - tgtC2.current.r) +
+        Math.abs(curC2.current.b - tgtC2.current.b);
+      if (diff < 0.004) {
+        colorSettledRef.current = true;
+      }
+    }
 
     if (starRef.current) {
       starRef.current.rotation.y += delta * 0.85;
@@ -208,7 +245,8 @@ export function StarlightTree({
         px += Math.cos(time * 0.5 + i) * 0.03;
       }
 
-      const twinkle = 0.72 + 0.28 * Math.sin(time * twinkleSpeed[i] + twinklePhase[i]);
+      const twinkle =
+        1 - twinkleIntensity + twinkleIntensity * Math.sin(time * twinkleSpeed[i] + twinklePhase[i]);
       const beatScale =
         mode === 'TREE' && i % 9 === 0 ? 1 + bass * 1.4 : 1 + audioLevel * 0.45;
       const scale = baseSizes[i] * twinkle * beatScale;
@@ -234,6 +272,7 @@ export function StarlightTree({
       />
       <mesh ref={starRef} position={[0, TREE_TOP_Y + 0.72, 0]} geometry={starGeo}>
         <meshStandardMaterial
+          ref={starMatRef}
           color={starColor}
           emissive={starColor}
           emissiveIntensity={1.25}

@@ -10,6 +10,8 @@ export type AppearanceId = 'midnight-glow' | 'vintage-noel' | 'memory-galaxy';
 /** @deprecated Alias kept for backward compatibility during incremental upgrades */
 export type ThemeId = AppearanceId;
 
+export type OrnamentStyle = 'velvet' | 'vintage' | 'crystal';
+
 export interface HandData {
   x: number;
   y: number;
@@ -59,6 +61,8 @@ export interface AppearanceLightingConfig {
   keyIntensity: number;
   rimColor: string;
   rimIntensity: number;
+  fillColor: string;
+  fillIntensity: number;
   envWarmColor: string;
   envCoolColor: string;
   exposure: number;
@@ -69,6 +73,8 @@ export interface AppearanceLightingConfig {
   bloomIntensity: number;
   bloomRadius: number;
   vignetteDarkness: number;
+  /** Enables subtle organic warm candle flicker (Vintage Noel) */
+  candleFlicker: boolean;
 }
 
 export interface AppearanceUIConfig {
@@ -91,6 +97,19 @@ export interface AppearanceMotionConfig {
   treeRotationSpeed: number;
   garlandFlowSpeed: number;
   twinkleIntensity: number;
+  polaroidFloatAmp: number;
+}
+
+export interface AppearanceFeaturesConfig {
+  ornamentStyle: OrnamentStyle;
+  /** Multi-layer tilted celestial rings around tree (Memory Galaxy) */
+  orbitalRings: boolean;
+  orbitalRingPrimary: string;
+  orbitalRingSecondary: string;
+  polaroidPaperTop: string;
+  polaroidPaperBottom: string;
+  polaroidBorderTint: string;
+  polaroidCaptionColor: string;
 }
 
 export interface AppearanceConfig {
@@ -98,7 +117,6 @@ export interface AppearanceConfig {
   name: string;
   englishName: string;
   tagline: string;
-  /** False for appearances scheduled in Phase 2 so the UI shows upcoming cards gracefully */
   available: boolean;
   previewGradient: string;
   swatches: [string, string, string, string, string];
@@ -106,6 +124,7 @@ export interface AppearanceConfig {
   lighting: AppearanceLightingConfig;
   ui: AppearanceUIConfig;
   motion: AppearanceMotionConfig;
+  features: AppearanceFeaturesConfig;
   defaults: {
     bgColor: string;
     accentColor: string;

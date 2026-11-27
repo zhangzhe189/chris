@@ -61,6 +61,131 @@ function useChristmasCountdown(): CountdownState {
   return countdown;
 }
 
+function AppearanceThumbnailArt({ item }: { item: AppearanceConfig }) {
+  const [c0, c1, c2, c3, c4] = item.swatches;
+
+  return (
+    <svg
+      viewBox="0 0 280 86"
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+    >
+      <defs>
+        <radialGradient id={`thumb-bg-${item.id}`} cx="68%" cy="55%" r="72%">
+          <stop offset="0%" stopColor={c1} stopOpacity="0.95" />
+          <stop offset="100%" stopColor={c0} stopOpacity="1" />
+        </radialGradient>
+        <radialGradient id={`thumb-glow-${item.id}`} cx="72%" cy="62%" r="36%">
+          <stop offset="0%" stopColor={c2} stopOpacity="0.45" />
+          <stop offset="100%" stopColor={c2} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      <rect width="280" height="86" fill={`url(#thumb-bg-${item.id})`} />
+      <rect width="280" height="86" fill={`url(#thumb-glow-${item.id})`} />
+
+      {/* Subtle stardust dots */}
+      <g fill={c3} opacity="0.55">
+        <circle cx="34" cy="18" r="0.9" />
+        <circle cx="88" cy="14" r="1.1" />
+        <circle cx="146" cy="22" r="0.8" />
+        <circle cx="242" cy="16" r="1.2" />
+        <circle cx="256" cy="46" r="0.9" />
+        <circle cx="120" cy="64" r="0.8" />
+      </g>
+
+      {/* Appearance-specific signature motif */}
+      {item.id === 'memory-galaxy' && (
+        <g fill="none" opacity="0.55">
+          <ellipse
+            cx="206"
+            cy="46"
+            rx="52"
+            ry="14"
+            transform="rotate(-14 206 46)"
+            stroke={c2}
+            strokeWidth="0.9"
+          />
+          <ellipse
+            cx="206"
+            cy="48"
+            rx="62"
+            ry="18"
+            transform="rotate(11 206 48)"
+            stroke={c3}
+            strokeWidth="0.7"
+          />
+          {/* Tiny floating polaroid memory silhouettes */}
+          <rect
+            x="162"
+            y="28"
+            width="9"
+            height="11"
+            rx="1"
+            transform="rotate(-12 166 33)"
+            fill={c4}
+            opacity="0.75"
+          />
+          <rect
+            x="238"
+            y="24"
+            width="9"
+            height="11"
+            rx="1"
+            transform="rotate(10 242 29)"
+            fill={c4}
+            opacity="0.7"
+          />
+        </g>
+      )}
+
+      {item.id === 'vintage-noel' && (
+        <g opacity="0.5">
+          {/* Warm candle aura & burgundy garland ribbons */}
+          <ellipse cx="206" cy="70" rx="44" ry="8" fill={c2} opacity="0.32" />
+          <path
+            d="M190 44 Q206 50 222 44 M184 58 Q206 65 228 58"
+            fill="none"
+            stroke={c4}
+            strokeWidth="1.6"
+          />
+        </g>
+      )}
+
+      {item.id === 'midnight-glow' && (
+        <g opacity="0.48">
+          {/* Elliptical champagne ground halo */}
+          <ellipse cx="206" cy="72" rx="46" ry="7.5" fill="none" stroke={c2} strokeWidth="1" />
+        </g>
+      )}
+
+      {/* Minimalist particle-tree silhouette + star topper */}
+      <g>
+        <path
+          d="M206 16 L229 68 L183 68 Z"
+          fill={c2}
+          fillOpacity="0.16"
+          stroke={c2}
+          strokeOpacity="0.45"
+          strokeWidth="0.8"
+        />
+        <path
+          d="M196 34 Q208 38 217 33 M191 48 Q206 54 221 47 M186 62 Q206 68 226 60"
+          fill="none"
+          stroke={c3}
+          strokeOpacity="0.72"
+          strokeWidth="0.9"
+        />
+        <circle cx="206" cy="14" r="2.6" fill={c3} />
+        <circle cx="198" cy="40" r="1.4" fill={c4} />
+        <circle cx="215" cy="54" r="1.5" fill={c4} />
+        <circle cx="203" cy="59" r="1.3" fill={c3} />
+      </g>
+    </svg>
+  );
+}
+
 type ActivePanel = 'none' | 'appearance' | 'album' | 'settings';
 
 interface HudOverlayProps {
@@ -173,13 +298,13 @@ export function HudOverlay({
         <div className="flex flex-col items-start pointer-events-none select-none">
           <h1 className="font-editorial italic font-normal tracking-[0.01em] leading-[0.92] drop-shadow-[0_4px_22px_rgba(5,9,19,0.75)]">
             <span
-              className="block text-[26px] sm:text-[34px] md:text-[42px]"
+              className="block text-[26px] sm:text-[34px] md:text-[42px] transition-colors duration-700"
               style={{ color: ui.ivory }}
             >
               Merry
             </span>
             <span
-              className="block text-[30px] sm:text-[40px] md:text-[50px] pl-1 sm:pl-2"
+              className="block text-[30px] sm:text-[40px] md:text-[50px] pl-1 sm:pl-2 transition-colors duration-700"
               style={{ color: ui.accent }}
             >
               Christmas
@@ -296,47 +421,33 @@ export function HudOverlay({
                     background: selected ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)',
                   }}
                 >
-                  {/* Visual Preview Thumbnail */}
-                  <div
-                    className="relative h-16 w-full overflow-hidden flex items-end justify-between px-3 py-2"
-                    style={{ background: item.previewGradient }}
-                  >
-                    {/* Subtle geometric starlight tree preview silhouette */}
-                    <div
-                      className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-12 opacity-60 pointer-events-none"
-                      style={{
-                        background: `conic-gradient(from 160deg at 50% 8%, transparent 0deg, ${item.ui.accent}80 18deg, ${item.ui.ivory}aa 22deg, transparent 42deg)`,
-                        filter: 'blur(0.4px)',
-                      }}
-                    />
-                    <div>
+                  {/* Visual Preview Thumbnail with bespoke artistic SVG motif */}
+                  <div className="relative h-20 w-full overflow-hidden flex items-end justify-between px-3.5 py-2.5">
+                    <AppearanceThumbnailArt item={item} />
+                    <div className="relative z-10">
                       <div
                         className="font-cinzel text-[10px] tracking-[0.2em]"
                         style={{ color: item.ui.accent }}
                       >
                         {item.englishName}
                       </div>
-                      <div className="text-xs font-medium" style={{ color: item.ui.ivory }}>
+                      <div className="text-xs font-medium mt-0.5" style={{ color: item.ui.ivory }}>
                         {item.name}
                       </div>
                     </div>
 
-                    {selected ? (
+                    {selected && (
                       <span
-                        className="w-5 h-5 rounded-full flex items-center justify-center"
+                        className="relative z-10 w-5 h-5 rounded-full flex items-center justify-center backdrop-blur-sm"
                         style={{
-                          background: `${item.ui.accent}2e`,
-                          border: `1px solid ${item.ui.accent}88`,
+                          background: `${item.ui.accent}30`,
+                          border: `1px solid ${item.ui.accent}99`,
                           color: item.ui.ivory,
                         }}
                       >
                         <Check size={11} />
                       </span>
-                    ) : !item.available ? (
-                      <span className="text-[9px] tracking-widest px-2 py-0.5 rounded-full bg-black/45 border border-white/15 text-white/70">
-                        即将上线
-                      </span>
-                    ) : null}
+                    )}
                   </div>
 
                   <div className="px-3 py-2 flex items-center justify-between gap-2">

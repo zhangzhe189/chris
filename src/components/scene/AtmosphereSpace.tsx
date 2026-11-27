@@ -78,7 +78,7 @@ export function AtmosphereSpace({ space, isLite }: AtmosphereSpaceProps) {
     [space.nebulaWarmCore, space.nebulaPrimary]
   );
 
-  // Subtle vertical sky dome shader (no static tree image — pure atmospheric gradient)
+  // Smooth color targets for theatrical sky-dome crossfade on Appearance switch
   const skyUniforms = useMemo(
     () => ({
       uZenith: { value: new THREE.Color(space.skyZenith) },
@@ -86,11 +86,13 @@ export function AtmosphereSpace({ space, isLite }: AtmosphereSpaceProps) {
     }),
     []
   );
+  const targetZenithRef = useRef(new THREE.Color(space.skyZenith));
+  const targetHorizonRef = useRef(new THREE.Color(space.skyHorizon));
 
   useEffect(() => {
-    skyUniforms.uZenith.value.set(space.skyZenith);
-    skyUniforms.uHorizon.value.set(space.skyHorizon);
-  }, [space.skyZenith, space.skyHorizon, skyUniforms]);
+    targetZenithRef.current.set(space.skyZenith);
+    targetHorizonRef.current.set(space.skyHorizon);
+  }, [space.skyZenith, space.skyHorizon]);
 
   useEffect(() => {
     return () => {
@@ -156,6 +158,10 @@ export function AtmosphereSpace({ space, isLite }: AtmosphereSpaceProps) {
   useFrame((state, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05);
     const t = state.clock.getElapsedTime();
+    const colorLerp = Math.min(1, delta * 3.4);
+
+    skyUniforms.uZenith.value.lerp(targetZenithRef.current, colorLerp);
+    skyUniforms.uHorizon.value.lerp(targetHorizonRef.current, colorLerp);
 
     if (farDustRef.current) {
       farDustRef.current.rotation.y += delta * space.farDustSpeed;

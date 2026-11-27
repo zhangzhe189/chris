@@ -3,7 +3,7 @@ import type { MutableRefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { GalleryPhoto, HandData } from '../../types';
+import type { AppearanceFeaturesConfig, GalleryPhoto, HandData } from '../../types';
 
 interface PhotoGallery3DProps {
   photos: GalleryPhoto[];
@@ -11,6 +11,11 @@ interface PhotoGallery3DProps {
   focusedPhotoId: string | null;
   onSelectPhoto: (id: string | null) => void;
   accentColor: string;
+  polaroidStyle: Pick<
+    AppearanceFeaturesConfig,
+    'polaroidPaperTop' | 'polaroidPaperBottom' | 'polaroidBorderTint' | 'polaroidCaptionColor'
+  >;
+  floatAmp?: number;
 }
 
 interface PolaroidPlacement {
@@ -23,7 +28,11 @@ interface PolaroidPlacement {
 
 function createPolaroidFrontTexture(
   img: HTMLImageElement | null,
-  caption: string
+  caption: string,
+  style: Pick<
+    AppearanceFeaturesConfig,
+    'polaroidPaperTop' | 'polaroidPaperBottom' | 'polaroidBorderTint' | 'polaroidCaptionColor'
+  >
 ): THREE.CanvasTexture {
   const width = 512;
   const height = 630;
@@ -33,16 +42,15 @@ function createPolaroidFrontTexture(
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Warm cream Polaroid paper background
+    // Theme-harmonized Polaroid paper gradient
     const paperGrad = ctx.createLinearGradient(0, 0, width, height);
-    paperGrad.addColorStop(0, '#fbf7ee');
-    paperGrad.addColorStop(0.55, '#f6efe0');
-    paperGrad.addColorStop(1, '#ede3cf');
+    paperGrad.addColorStop(0, style.polaroidPaperTop);
+    paperGrad.addColorStop(1, style.polaroidPaperBottom);
     ctx.fillStyle = paperGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // Subtle warm outer border sheen
-    ctx.strokeStyle = 'rgba(218, 178, 102, 0.42)';
+    // Subtle themed outer border sheen
+    ctx.strokeStyle = style.polaroidBorderTint;
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, width - 4, height - 4);
 
@@ -78,15 +86,15 @@ function createPolaroidFrontTexture(
     ctx.lineWidth = 2;
     ctx.strokeRect(padX, padTop, boxSize, boxSize);
 
-    // Warm handwritten caption in bottom Polaroid chin
-    ctx.fillStyle = '#473c32';
+    // Handwritten caption in bottom Polaroid chin
+    ctx.fillStyle = style.polaroidCaptionColor;
     ctx.font = 'italic 600 32px "Caveat", "Noto Serif SC", Georgia, serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(caption || 'Winter Memory', width / 2, padTop + boxSize + 72, boxSize);
 
-    // Tiny decorative gold star dot under caption
-    ctx.fillStyle = 'rgba(202, 152, 68, 0.65)';
+    // Tiny decorative dot under caption
+    ctx.fillStyle = style.polaroidBorderTint;
     ctx.beginPath();
     ctx.arc(width / 2, padTop + boxSize + 112, 3.5, 0, Math.PI * 2);
     ctx.fill();
@@ -143,6 +151,10 @@ interface PolaroidCardProps {
   placement: PolaroidPlacement;
   backTexture: THREE.CanvasTexture;
   accentColor: string;
+  polaroidStyle: Pick<
+    AppearanceFeaturesConfig,
+    'polaroidPaperTop' | 'polaroidPaperBottom' | 'polaroidBorderTint' | 'polaroidCaptionColor'
+  >;
   isFocused: boolean;
   onToggleFocus: (id: string) => void;
   registerGroup: (id: string, group: THREE.Group | null) => void;
@@ -152,12 +164,13 @@ function PolaroidCard({
   placement,
   backTexture,
   accentColor,
+  polaroidStyle,
   isFocused,
   onToggleFocus,
   registerGroup,
 }: PolaroidCardProps) {
   const [frontTexture, setFrontTexture] = useState<THREE.CanvasTexture>(() =>
-    createPolaroidFrontTexture(null, placement.photo.caption)
+    createPolaroidFrontTexture(null, placement.photo.caption, polaroidStyle)
   );
   const [hovered, setHovered] = useState(false);
 
@@ -167,7 +180,7 @@ function PolaroidCard({
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       if (!active) return;
-      const nextTex = createPolaroidFrontTexture(img, placement.photo.caption);
+      const nextTex = createPolaroidFrontTexture(img, placement.photo.caption, polaroidStyle);
       setFrontTexture((prev) => {
         prev.dispose();
         return nextTex;
@@ -177,7 +190,14 @@ function PolaroidCard({
     return () => {
       active = false;
     };
-  }, [placement.photo.url, placement.photo.caption]);
+  }, [
+    placement.photo.url,
+    placement.photo.caption,
+    polaroidStyle.polaroidPaperTop,
+    polaroidStyle.polaroidPaperBottom,
+    polaroidStyle.polaroidBorderTint,
+    polaroidStyle.polaroidCaptionColor,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -261,6 +281,8 @@ export function PhotoGallery3D({
   focusedPhotoId,
   onSelectPhoto,
   accentColor,
+  polaroidStyle,
+  floatAmp = 0.24,
 }: PhotoGallery3DProps) {
   const { camera } = useThree();
   const containerRef = useRef<THREE.Group | null>(null);
@@ -400,7 +422,7 @@ export function PhotoGallery3D({
         group.scale.setScalar(s);
       } else {
         tmpTargetLocal.copy(p.initialPos);
-        tmpTargetLocal.y += Math.sin(time * 1.15 + p.phase) * 0.24;
+        tmpTargetLocal.y += Math.sin(time * 1.15 + p.phase) * floatAmp;
         tmpTargetQuat.setFromEuler(p.initialRot);
 
         group.position.lerp(tmpTargetLocal, lerpSpeed);
@@ -419,6 +441,7 @@ export function PhotoGallery3D({
           placement={placement}
           backTexture={backTexture}
           accentColor={accentColor}
+          polaroidStyle={polaroidStyle}
           isFocused={focusedPhotoId === placement.photo.id}
           onToggleFocus={handleToggleFocus}
           registerGroup={registerGroup}

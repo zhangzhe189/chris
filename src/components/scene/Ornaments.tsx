@@ -1,8 +1,8 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { AudioMetrics, HandData, TreeMode } from '../../types';
+import type { AudioMetrics, HandData, OrnamentStyle, TreeMode } from '../../types';
 import { TREE_HEIGHT, TREE_RADIUS } from './constants';
 
 interface OrnamentsProps {
@@ -16,6 +16,7 @@ interface OrnamentsProps {
   boxColor2: string;
   ribbonColor: string;
   bellColor: string;
+  ornamentStyle?: OrnamentStyle;
   boxMetalness?: number;
   boxRoughness?: number;
   bellMetalness?: number;
@@ -78,6 +79,7 @@ export function Ornaments({
   boxColor2,
   ribbonColor,
   bellColor,
+  ornamentStyle = 'velvet',
   boxMetalness = 0.36,
   boxRoughness = 0.42,
   bellMetalness = 0.9,
@@ -87,36 +89,37 @@ export function Ornaments({
   const ribbonAMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const ribbonBMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const bellMeshRef = useRef<THREE.InstancedMesh | null>(null);
+  const ribbonMatARef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const ribbonMatBRef = useRef<THREE.MeshStandardMaterial | null>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
+
+  // Smooth color interpolation refs for seamless Appearance switching
+  const curBox1 = useRef(new THREE.Color(boxColor1));
+  const curBox2 = useRef(new THREE.Color(boxColor2));
+  const curRibbon = useRef(new THREE.Color(ribbonColor));
+  const curBell = useRef(new THREE.Color(bellColor));
+  const tgtBox1 = useRef(new THREE.Color(boxColor1));
+  const tgtBox2 = useRef(new THREE.Color(boxColor2));
+  const tgtRibbon = useRef(new THREE.Color(ribbonColor));
+  const tgtBell = useRef(new THREE.Color(bellColor));
+  const colorSettledRef = useRef(false);
+  const tempColor = useMemo(() => new THREE.Color(), []);
+  const warmHighlight = useMemo(() => new THREE.Color('#f5ede0'), []);
+
+  useEffect(() => {
+    tgtBox1.current.set(boxColor1);
+    tgtBox2.current.set(boxColor2);
+    tgtRibbon.current.set(ribbonColor);
+    tgtBell.current.set(bellColor);
+    colorSettledRef.current = false;
+  }, [boxColor1, boxColor2, ribbonColor, bellColor, ornamentStyle, boxCount, bellCount]);
 
   // Refined, jewel-sized gifts and baubles that preserve the tree silhouette
   const boxes = useMemo(() => generateItems(boxCount, 0.17, 0.14), [boxCount]);
   const bells = useMemo(() => generateItems(bellCount, 0.14, 0.12), [bellCount]);
 
-  useLayoutEffect(() => {
-    const mesh = boxMeshRef.current;
-    if (!mesh || boxCount === 0) return;
-    const c1 = new THREE.Color(boxColor1);
-    const c2 = new THREE.Color(boxColor2);
-    boxes.forEach((item, idx) => {
-      mesh.setColorAt(idx, item.variant === 1 ? c1 : c2);
-    });
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [boxes, boxCount, boxColor1, boxColor2]);
-
-  useLayoutEffect(() => {
-    const mesh = bellMeshRef.current;
-    if (!mesh || bellCount === 0) return;
-    const base = new THREE.Color(bellColor);
-    const warmHighlight = new THREE.Color('#fff1cc');
-    const c = new THREE.Color();
-    bells.forEach((item, idx) => {
-      c.copy(base);
-      if (item.variant === 2) c.lerp(warmHighlight, 0.22);
-      mesh.setColorAt(idx, c);
-    });
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [bells, bellCount, bellColor]);
+  const isCrystal = ornamentStyle === 'crystal';
+  const isVintage = ornamentStyle === 'vintage';
 
   useFrame((state, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05);
@@ -127,7 +130,54 @@ export function Ornaments({
     const explosionDist = 9.8;
     const lerpRate = Math.min(1, (isBlooming ? 4.0 : 2.1) * delta);
 
-    if (boxCount > 0 && boxMeshRef.current && ribbonAMeshRef.current && ribbonBMeshRef.current) {
+    // Smoothly crossfade instance colors until settled
+    if (!colorSettledRef.current) {
+      const colStep = Math.min(1, delta * 4.5);
+      curBox1.current.lerp(tgtBox1.current, colStep);
+      curBox2.current.lerp(tgtBox2.current, colStep);
+      curRibbon.current.lerp(tgtRibbon.current, colStep);
+      curBell.current.lerp(tgtBell.current, colStep);
+
+      if (boxMeshRef.current && boxCount > 0) {
+        for (let i = 0; i < boxes.length; i++) {
+          boxMeshRef.current.setColorAt(
+            i,
+            boxes[i].variant === 1 ? curBox1.current : curBox2.current
+          );
+        }
+        if (boxMeshRef.current.instanceColor) boxMeshRef.current.instanceColor.needsUpdate = true;
+      }
+
+      if (ribbonMatARef.current) {
+        ribbonMatARef.current.color.copy(curRibbon.current);
+        ribbonMatARef.current.emissive.copy(curRibbon.current);
+      }
+      if (ribbonMatBRef.current) {
+        ribbonMatBRef.current.color.copy(curRibbon.current);
+        ribbonMatBRef.current.emissive.copy(curRibbon.current);
+      }
+
+      if (bellMeshRef.current && bellCount > 0) {
+        for (let i = 0; i < bells.length; i++) {
+          tempColor.copy(curBell.current);
+          if (bells[i].variant === 2) tempColor.lerp(warmHighlight, 0.24);
+          bellMeshRef.current.setColorAt(i, tempColor);
+        }
+        if (bellMeshRef.current.instanceColor) bellMeshRef.current.instanceColor.needsUpdate = true;
+      }
+
+      const diff =
+        Math.abs(curBox1.current.r - tgtBox1.current.r) +
+        Math.abs(curBox1.current.g - tgtBox1.current.g) +
+        Math.abs(curBox2.current.b - tgtBox2.current.b) +
+        Math.abs(curBell.current.r - tgtBell.current.r) +
+        Math.abs(curRibbon.current.r - tgtRibbon.current.r);
+      if (diff < 0.004) {
+        colorSettledRef.current = true;
+      }
+    }
+
+    if (boxCount > 0 && boxMeshRef.current) {
       for (let i = 0; i < boxes.length; i++) {
         const item = boxes[i];
         let tx = mode === 'TREE' ? item.treePos.x : item.randomPos.x;
@@ -146,23 +196,24 @@ export function Ornaments({
         item.currentPos.z += (tz - item.currentPos.z) * lerpRate;
 
         dummy.position.copy(item.currentPos);
+        const spin = isCrystal ? 0.32 : isVintage ? 0.14 : 0.2;
         dummy.rotation.set(
-          item.rotation.x + time * 0.18,
-          item.rotation.y + time * 0.24,
+          item.rotation.x + time * spin * 0.75,
+          item.rotation.y + time * spin,
           item.rotation.z
         );
-        const s = item.baseScale * (1 + audioLevel * 0.38);
+        const s = item.baseScale * (isCrystal ? 1.15 : 1) * (1 + audioLevel * 0.35);
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
 
         boxMeshRef.current.setMatrixAt(i, dummy.matrix);
-        ribbonAMeshRef.current.setMatrixAt(i, dummy.matrix);
-        ribbonBMeshRef.current.setMatrixAt(i, dummy.matrix);
+        if (ribbonAMeshRef.current) ribbonAMeshRef.current.setMatrixAt(i, dummy.matrix);
+        if (ribbonBMeshRef.current) ribbonBMeshRef.current.setMatrixAt(i, dummy.matrix);
       }
 
       boxMeshRef.current.instanceMatrix.needsUpdate = true;
-      ribbonAMeshRef.current.instanceMatrix.needsUpdate = true;
-      ribbonBMeshRef.current.instanceMatrix.needsUpdate = true;
+      if (ribbonAMeshRef.current) ribbonAMeshRef.current.instanceMatrix.needsUpdate = true;
+      if (ribbonBMeshRef.current) ribbonBMeshRef.current.instanceMatrix.needsUpdate = true;
     }
 
     if (bellCount > 0 && bellMeshRef.current) {
@@ -184,8 +235,8 @@ export function Ornaments({
         item.currentPos.z += (tz - item.currentPos.z) * lerpRate;
 
         dummy.position.copy(item.currentPos);
-        dummy.rotation.set(item.rotation.x, item.rotation.y + time * 0.45, item.rotation.z);
-        const s = item.baseScale * (1 + audioLevel * 0.42);
+        dummy.rotation.set(item.rotation.x, item.rotation.y + time * 0.4, item.rotation.z);
+        const s = item.baseScale * (1 + audioLevel * 0.38);
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
 
@@ -199,58 +250,92 @@ export function Ornaments({
     <group>
       {boxCount > 0 && (
         <>
+          {/* Crystal faceted keepsakes in Memory Galaxy; refined gift boxes in Midnight & Vintage */}
           <instancedMesh
-            key={`gift-body-${boxCount}`}
+            key={`gift-body-${ornamentStyle}-${boxCount}`}
             ref={boxMeshRef}
             args={[undefined, undefined, boxCount]}
             frustumCulled={false}
           >
-            <boxGeometry args={[1, 0.92, 1]} />
+            {isCrystal ? (
+              <octahedronGeometry args={[0.72, 0]} />
+            ) : (
+              <boxGeometry args={[1, 0.92, 1]} />
+            )}
             <meshStandardMaterial
               metalness={boxMetalness}
               roughness={boxRoughness}
-              envMapIntensity={1.2}
+              envMapIntensity={isCrystal ? 2.5 : 1.2}
+              transparent={isCrystal}
+              opacity={isCrystal ? 0.8 : 1}
+              emissive={isCrystal ? '#C5B3EF' : '#000000'}
+              emissiveIntensity={isCrystal ? 0.16 : 0}
             />
           </instancedMesh>
-          {/* Delicate champagne-gold cross-ribbons wrapping each gift box */}
-          <instancedMesh
-            key={`gift-ribbon-a-${boxCount}`}
-            ref={ribbonAMeshRef}
-            args={[undefined, undefined, boxCount]}
-            frustumCulled={false}
-          >
-            <boxGeometry args={[1.03, 0.95, 0.15]} />
-            <meshStandardMaterial
-              color={ribbonColor}
-              emissive={ribbonColor}
-              emissiveIntensity={0.14}
-              metalness={0.88}
-              roughness={0.22}
-              envMapIntensity={1.6}
-            />
-          </instancedMesh>
-          <instancedMesh
-            key={`gift-ribbon-b-${boxCount}`}
-            ref={ribbonBMeshRef}
-            args={[undefined, undefined, boxCount]}
-            frustumCulled={false}
-          >
-            <boxGeometry args={[0.15, 0.95, 1.03]} />
-            <meshStandardMaterial
-              color={ribbonColor}
-              emissive={ribbonColor}
-              emissiveIntensity={0.14}
-              metalness={0.88}
-              roughness={0.22}
-              envMapIntensity={1.6}
-            />
-          </instancedMesh>
+
+          {/* Cross ribbons for classic/vintage gifts; thin luminous orbital ring for crystal gifts */}
+          {isCrystal ? (
+            <instancedMesh
+              key={`gift-crystal-ring-${boxCount}`}
+              ref={ribbonAMeshRef}
+              args={[undefined, undefined, boxCount]}
+              frustumCulled={false}
+            >
+              <torusGeometry args={[0.88, 0.045, 6, 20]} />
+              <meshStandardMaterial
+                ref={ribbonMatARef}
+                color={ribbonColor}
+                emissive={ribbonColor}
+                emissiveIntensity={0.4}
+                metalness={0.9}
+                roughness={0.14}
+                envMapIntensity={2.2}
+              />
+            </instancedMesh>
+          ) : (
+            <>
+              <instancedMesh
+                key={`gift-ribbon-a-${ornamentStyle}-${boxCount}`}
+                ref={ribbonAMeshRef}
+                args={[undefined, undefined, boxCount]}
+                frustumCulled={false}
+              >
+                <boxGeometry args={[1.03, 0.95, isVintage ? 0.18 : 0.15]} />
+                <meshStandardMaterial
+                  ref={ribbonMatARef}
+                  color={ribbonColor}
+                  emissive={ribbonColor}
+                  emissiveIntensity={isVintage ? 0.08 : 0.14}
+                  metalness={isVintage ? 0.45 : 0.88}
+                  roughness={isVintage ? 0.36 : 0.22}
+                  envMapIntensity={isVintage ? 1.3 : 1.6}
+                />
+              </instancedMesh>
+              <instancedMesh
+                key={`gift-ribbon-b-${ornamentStyle}-${boxCount}`}
+                ref={ribbonBMeshRef}
+                args={[undefined, undefined, boxCount]}
+                frustumCulled={false}
+              >
+                <boxGeometry args={[isVintage ? 0.18 : 0.15, 0.95, 1.03]} />
+                <meshStandardMaterial
+                  ref={ribbonMatBRef}
+                  color={ribbonColor}
+                  emissive={ribbonColor}
+                  emissiveIntensity={isVintage ? 0.08 : 0.14}
+                  metalness={isVintage ? 0.45 : 0.88}
+                  roughness={isVintage ? 0.36 : 0.22}
+                  envMapIntensity={isVintage ? 1.3 : 1.6}
+                />
+              </instancedMesh>
+            </>
+          )}
         </>
       )}
 
       {bellCount > 0 && (
         <instancedMesh
-          key={`baubles-${bellCount}`}
+          key={`baubles-${ornamentStyle}-${bellCount}`}
           ref={bellMeshRef}
           args={[undefined, undefined, bellCount]}
           frustumCulled={false}
@@ -259,7 +344,7 @@ export function Ornaments({
           <meshStandardMaterial
             metalness={bellMetalness}
             roughness={bellRoughness}
-            envMapIntensity={1.85}
+            envMapIntensity={isCrystal ? 2.1 : 1.85}
           />
         </instancedMesh>
       )}

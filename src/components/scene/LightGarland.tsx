@@ -11,6 +11,7 @@ interface LightGarlandProps {
   handDataRef: MutableRefObject<HandData>;
   bloomActiveRef: MutableRefObject<boolean>;
   colors: [string, string, string];
+  flowSpeed?: number;
   count?: number;
 }
 
@@ -20,6 +21,7 @@ export function LightGarland({
   handDataRef,
   bloomActiveRef,
   colors,
+  flowSpeed = 1.45,
   count = 240,
 }: LightGarlandProps) {
   const meshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -70,7 +72,12 @@ export function LightGarland({
     return { treePos, floatPos, currentPos, explosionDir, phases, paletteIdx };
   }, [count]);
 
-  const palette = useMemo(
+  const curPalette = useRef<[THREE.Color, THREE.Color, THREE.Color]>([
+    new THREE.Color(colors[0]),
+    new THREE.Color(colors[1]),
+    new THREE.Color(colors[2]),
+  ]);
+  const tgtPalette = useMemo(
     () => [new THREE.Color(colors[0]), new THREE.Color(colors[1]), new THREE.Color(colors[2])],
     [colors]
   );
@@ -85,6 +92,11 @@ export function LightGarland({
     const isBlooming =
       handDataRef.current.gesture === 'OPEN' || bloomActiveRef.current;
     const lerpRate = Math.min(1, (isBlooming ? 4.2 : 2.5) * delta);
+
+    const colRate = Math.min(1, delta * 4.2);
+    curPalette.current[0].lerp(tgtPalette[0], colRate);
+    curPalette.current[1].lerp(tgtPalette[1], colRate);
+    curPalette.current[2].lerp(tgtPalette[2], colRate);
 
     const { treePos, floatPos, currentPos, explosionDir, phases, paletteIdx } = data;
 
@@ -107,11 +119,12 @@ export function LightGarland({
 
       const phase = phases[i];
       // Flowing continuous shimmer travelling slowly up the slender spiral
-      const travelWave = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * 1.55 - (i / count) * 14 + phase * 0.35));
+      const travelWave =
+        0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * flowSpeed - (i / count) * 14 + phase * 0.35));
       const beat = 1 + audioLevel * 1.05 * (0.5 + 0.5 * Math.sin(time * 5 + phase * 2));
       const intensity = travelWave * beat * 1.06;
 
-      const base = palette[paletteIdx[i]];
+      const base = curPalette.current[paletteIdx[i]];
       tempColor.setRGB(base.r * intensity, base.g * intensity, base.b * intensity);
       mesh.setColorAt(i, tempColor);
 
