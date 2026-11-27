@@ -11,7 +11,8 @@ import type {
   GalleryPhoto,
   HandData,
   SceneConfig,
-  TreeMode,
+  SceneState,
+  SnowBurstRequest,
 } from '../../types';
 import { StarlightTree } from './StarlightTree';
 import { Ornaments } from './Ornaments';
@@ -19,25 +20,23 @@ import { LightGarland } from './LightGarland';
 import { AtmosphereSpace } from './AtmosphereSpace';
 import { CelestialOrbits } from './CelestialOrbits';
 import { SnowAndGround } from './SnowAndGround';
+import { SnowBurstSystem } from './SnowBurstSystem';
 import { PhotoGallery3D } from './PhotoGallery3D';
 
 interface ChristmasSceneProps {
-  mode: TreeMode;
+  sceneState: SceneState;
   appearance: AppearanceConfig;
   config: SceneConfig;
   photos: GalleryPhoto[];
   audioMetricsRef: MutableRefObject<AudioMetrics>;
   handDataRef: MutableRefObject<HandData>;
-  bloomActiveRef: MutableRefObject<boolean>;
+  burstQueueRef: MutableRefObject<SnowBurstRequest[]>;
   focusedPhotoId: string | null;
   onSelectPhoto: (id: string | null) => void;
+  onTriggerSkyBurst: (nx: number, ny: number) => void;
   isLite: boolean;
 }
 
-/**
- * Smoothly crossfades scene background, fog, key/rim/fill lighting, exposure,
- * and organic warm candlelight flicker across Appearance transitions.
- */
 function SceneLightingRig({
   bgColor,
   lighting,
@@ -95,7 +94,6 @@ function SceneLightingRig({
 
     gl.toneMappingExposure += (lighting.exposure - gl.toneMappingExposure) * rate;
 
-    // Subtle organic candlelight flicker for Vintage Noel
     const flicker = lighting.candleFlicker
       ? 1 + 0.055 * Math.sin(t * 4.1) + 0.035 * Math.sin(t * 7.3) + 0.018 * Math.sin(t * 13.7)
       : 1;
@@ -153,46 +151,111 @@ function SceneLightingRig({
 }
 
 interface RotatingTreeAssemblyProps {
-  mode: TreeMode;
+  sceneState: SceneState;
   appearance: AppearanceConfig;
   config: SceneConfig;
   photos: GalleryPhoto[];
   audioMetricsRef: MutableRefObject<AudioMetrics>;
   handDataRef: MutableRefObject<HandData>;
-  bloomActiveRef: MutableRefObject<boolean>;
   focusedPhotoId: string | null;
   onSelectPhoto: (id: string | null) => void;
   isLite: boolean;
 }
 
+/**
+ * Coordinates continuous Quiet <-> Bloom orbital morph progress (0..1)
+ * and smooth inertial hand-driven galaxy rotation with damping & pinch lock.
+ */
 function RotatingTreeAssembly({
-  mode,
+  sceneState,
   appearance,
   config,
   photos,
   audioMetricsRef,
   handDataRef,
-  bloomActiveRef,
   focusedPhotoId,
   onSelectPhoto,
   isLite,
 }: RotatingTreeAssemblyProps) {
   const groupRef = useRef<THREE.Group | null>(null);
+  const bloomProgressRef = useRef(sceneState === 'BLOOM' ? 1 : 0);
+
+  // Inertial rotation & subtle pitch exploration state for moving-hand gesture
+  const rotVelYRef = useRef(0);
+  const pitchRef = useRef(0);
+  const pinchLockUntilRef = useRef(0);
 
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05);
-    if (groupRef.current && mode === 'TREE' && !focusedPhotoId) {
-      groupRef.current.rotation.y += delta * appearance.motion.treeRotationSpeed;
+
+    // Smoothly advance Quiet (0) <-> Bloom (1) progress independent of Appearance
+    const bloomTarget = sceneState === 'BLOOM' ? 1 : 0;
+    const morphSpeed = bloomTarget > bloomProgressRef.current ? 1.45 : 1.7;
+    const diff = bloomTarget - bloomProgressRef.current;
+    if (Math.abs(diff) > 0.0005) {
+      bloomProgressRef.current += Math.sign(diff) * Math.min(Math.abs(diff), delta * morphSpeed);
+    } else {
+      bloomProgressRef.current = bloomTarget;
     }
+
+    const group = groupRef.current;
+    if (!group) return;
+
+    const hand = handDataRef.current;
+    const nowMs = performance.now();
+
+    // Lock rotational impulse during/right after PINCH so selecting photos never spins the galaxy
+    if (hand.source === 'camera' && hand.gesture === 'PINCH') {
+      pinchLockUntilRef.current = nowMs + 480;
+    }
+
+    const allowHandExplore =
+      hand.source === 'camera' &&
+      hand.isPresent &&
+      !focusedPhotoId &&
+      nowMs > pinchLockUntilRef.current &&
+      hand.gesture !== 'PINCH';
+
+    if (allowHandExplore) {
+      // Inject smoothed horizontal momentum & gentle vertical tilt from palm motion
+      if (Math.abs(hand.vx) > 0.0001) {
+        const gain = sceneState === 'BLOOM' ? 3.8 : 2.9;
+        rotVelYRef.current = THREE.MathUtils.clamp(
+          rotVelYRef.current + hand.vx * gain,
+          -2.4,
+          2.4
+        );
+      }
+      if (Math.abs(hand.vy) > 0.0001) {
+        pitchRef.current = THREE.MathUtils.clamp(pitchRef.current + hand.vy * 0.55, -0.22, 0.22);
+      }
+    }
+
+    // Exponential physical damping so galaxy glides to a silky stop
+    const damping = Math.exp(-delta * 3.4);
+    rotVelYRef.current *= damping;
+    if (Math.abs(rotVelYRef.current) < 0.0005) rotVelYRef.current = 0;
+
+    // Gentle pitch relaxation back to horizon when hand is idle/away
+    if (!allowHandExplore || Math.abs(hand.vy) < 0.0001) {
+      pitchRef.current *= Math.exp(-delta * 1.8);
+    }
+
+    const baseSpin = focusedPhotoId
+      ? 0
+      : sceneState === 'BLOOM'
+        ? appearance.motion.treeRotationSpeed * 0.55
+        : appearance.motion.treeRotationSpeed;
+
+    group.rotation.y += (baseSpin + rotVelYRef.current) * delta;
+    group.rotation.x += (pitchRef.current - group.rotation.x) * Math.min(1, delta * 4.5);
   });
 
   return (
     <group ref={groupRef}>
       <StarlightTree
-        mode={mode}
+        bloomProgressRef={bloomProgressRef}
         audioMetricsRef={audioMetricsRef}
-        handDataRef={handDataRef}
-        bloomActiveRef={bloomActiveRef}
         count={config.particleCount}
         color1={config.particleColor1}
         color2={config.particleColor2}
@@ -200,10 +263,8 @@ function RotatingTreeAssembly({
         twinkleIntensity={appearance.motion.twinkleIntensity}
       />
       <Ornaments
-        mode={mode}
+        bloomProgressRef={bloomProgressRef}
         audioMetricsRef={audioMetricsRef}
-        handDataRef={handDataRef}
-        bloomActiveRef={bloomActiveRef}
         boxCount={config.boxCount}
         bellCount={config.bellCount}
         boxColor1={config.boxColor1}
@@ -217,16 +278,15 @@ function RotatingTreeAssembly({
         bellRoughness={appearance.defaults.bellRoughness}
       />
       <LightGarland
-        mode={mode}
+        bloomProgressRef={bloomProgressRef}
         audioMetricsRef={audioMetricsRef}
-        handDataRef={handDataRef}
-        bloomActiveRef={bloomActiveRef}
         colors={config.garlandColors}
         flowSpeed={appearance.motion.garlandFlowSpeed}
         count={isLite ? 150 : 300}
       />
       <PhotoGallery3D
         photos={photos}
+        bloomProgressRef={bloomProgressRef}
         handDataRef={handDataRef}
         focusedPhotoId={focusedPhotoId}
         onSelectPhoto={onSelectPhoto}
@@ -239,23 +299,30 @@ function RotatingTreeAssembly({
 }
 
 export function ChristmasScene({
-  mode,
+  sceneState,
   appearance,
   config,
   photos,
   audioMetricsRef,
   handDataRef,
-  bloomActiveRef,
+  burstQueueRef,
   focusedPhotoId,
   onSelectPhoto,
+  onTriggerSkyBurst,
   isLite,
 }: ChristmasSceneProps) {
   const { lighting, space, features } = appearance;
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
 
   return (
     <div
       className="w-full h-screen relative transition-colors duration-700"
       style={{ background: config.bgColor }}
+      onPointerDown={(e) => {
+        if (e.button === 0) {
+          pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+        }
+      }}
     >
       <Canvas
         camera={{ position: [0, 1.35, 22.5], fov: 44 }}
@@ -266,11 +333,22 @@ export function ChristmasScene({
           powerPreference: 'high-performance',
         }}
         dpr={isLite ? [1, 1.5] : [1, 2]}
-        onPointerMissed={() => {
-          if (focusedPhotoId) onSelectPhoto(null);
+        onPointerMissed={(e) => {
+          const down = pointerDownPosRef.current;
+          pointerDownPosRef.current = null;
+          if (!down) return;
+          const moveDist = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+          // Ignore camera drags; treat crisp tap/click on empty sky as dismiss OR trailing snow burst
+          if (moveDist > 6) return;
+          if (focusedPhotoId) {
+            onSelectPhoto(null);
+            return;
+          }
+          const nx = e.clientX / Math.max(1, window.innerWidth);
+          const ny = e.clientY / Math.max(1, window.innerHeight);
+          onTriggerSkyBurst(nx, ny);
         }}
       >
-        {/* Smoothly interpolated atmospheric lighting rig + background/fog + Vintage Noel candlelight */}
         <SceneLightingRig bgColor={config.bgColor} lighting={lighting} />
 
         <Environment resolution={256}>
@@ -305,10 +383,8 @@ export function ChristmasScene({
           </group>
         </Environment>
 
-        {/* Layers 1 & 2: Far sky dome + slow stardust + midground breathing mist */}
         <AtmosphereSpace space={space} isLite={isLite} />
 
-        {/* Memory Galaxy signature multi-layer tilted celestial orbital rings */}
         <CelestialOrbits
           visible={features.orbitalRings}
           primaryColor={features.orbitalRingPrimary}
@@ -316,30 +392,29 @@ export function ChristmasScene({
           isLite={isLite}
         />
 
-        {/* Hero 3D Tree Assembly */}
         <group rotation={[0, -Math.PI / 4, 0]}>
           <RotatingTreeAssembly
-            mode={mode}
+            sceneState={sceneState}
             appearance={appearance}
             config={config}
             photos={photos}
             audioMetricsRef={audioMetricsRef}
             handDataRef={handDataRef}
-            bloomActiveRef={bloomActiveRef}
             focusedPhotoId={focusedPhotoId}
             onSelectPhoto={onSelectPhoto}
             isLite={isLite}
           />
         </group>
 
-        {/* Layers 3 & 4: Dual-depth parallax snow/bokeh + feathered elliptical ground halo & embers */}
-        <SnowAndGround
-          space={space}
-          groundCoreColor={config.ringColor}
+        <SnowAndGround space={space} groundCoreColor={config.ringColor} isLite={isLite} />
+
+        <SnowBurstSystem
+          burstQueueRef={burstQueueRef}
+          primaryColor={appearance.ui.ivory}
+          accentColor={config.accentColor}
           isLite={isLite}
         />
 
-        {/* Restrained filmic bloom & subtle vignette (skipped gracefully in lite mode) */}
         {!isLite && (
           <EffectComposer enableNormalPass={false}>
             <Bloom

@@ -27,7 +27,8 @@ import type {
   GestureType,
   HandData,
   SceneConfig,
-  TreeMode,
+  SceneState,
+  SnowBurstRequest,
 } from './types';
 
 function detectLiteMode(): boolean {
@@ -38,14 +39,14 @@ function detectLiteMode(): boolean {
 export function App() {
   const isLite = useMemo(() => detectLiteMode(), []);
 
+  // Appearance and SceneState are strictly independent
   const [appearanceId, setAppearanceId] = useState<AppearanceId>(() => loadSavedAppearanceId());
   const appearance = useMemo(() => getAppearance(appearanceId), [appearanceId]);
+  const [sceneState, setSceneState] = useState<SceneState>('QUIET');
 
-  const [mode, setMode] = useState<TreeMode>('TREE');
   const [config, setConfig] = useState<SceneConfig>(() =>
     createSceneConfigFromAppearance(getAppearance(loadSavedAppearanceId()), isLite)
   );
-  const [isBloomActive, setIsBloomActive] = useState(false);
 
   // Audio state (built-in music box by default, supports uploading local audio)
   const [isPlaying, setIsPlaying] = useState(true);
@@ -67,16 +68,17 @@ export function App() {
   const handDataRef = useRef<HandData>({
     x: 0.5,
     y: 0.5,
+    vx: 0,
+    vy: 0,
     gesture: 'IDLE',
     isPresent: false,
     source: 'mouse',
   });
-  const bloomActiveRef = useRef(false);
+  const burstQueueRef = useRef<SnowBurstRequest[]>([]);
+  const nextBurstIdRef = useRef(1);
+  const lastTapBurstAtRef = useRef(0);
   const cursorElRef = useRef<HTMLDivElement | null>(null);
   const customAudioUrlRef = useRef<string | null>(null);
-
-  // Keep imperative ref synced with manual bloom toggle for zero-rerender 3D frame loop
-  bloomActiveRef.current = isBloomActive;
 
   const { audioMetricsRef, autoplayBlocked, unlockAudio } = useAudioEngine({
     isPlaying,
@@ -110,7 +112,7 @@ export function App() {
         setUserPhotos(loaded);
       })
       .catch(() => {
-        // Ignore IndexedDB unavailability (e.g., strict private browsing)
+        // Ignore IndexedDB unavailability
       });
 
     return () => {
@@ -119,7 +121,6 @@ export function App() {
     };
   }, []);
 
-  // Revoke custom audio object URL on unmount
   useEffect(() => {
     return () => {
       if (customAudioUrlRef.current) {
@@ -128,14 +129,14 @@ export function App() {
     };
   }, []);
 
-  // Escape key closes zoomed Polaroid; Spacebar toggles starlight bloom
+  // Escape closes focused Polaroid; Space toggles Quiet <-> Bloom
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setFocusedPhotoId(null);
       } else if (e.code === 'Space' && e.target === document.body) {
         e.preventDefault();
-        setIsBloomActive((prev) => !prev);
+        setSceneState((prev) => (prev === 'QUIET' ? 'BLOOM' : 'QUIET'));
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -147,7 +148,6 @@ export function App() {
     return [...userPhotos, ...activeDefaults];
   }, [userPhotos, removedDefaultIds]);
 
-  // Clear focused photo if it gets deleted
   useEffect(() => {
     if (focusedPhotoId && !galleryPhotos.some((p) => p.id === focusedPhotoId)) {
       setFocusedPhotoId(null);
@@ -161,7 +161,6 @@ export function App() {
       saveAppearanceId(next.id);
       setConfig((prev) => ({
         ...createSceneConfigFromAppearance(next, isLite),
-        // Preserve user's customized density sliders when switching appearances
         particleCount: prev.particleCount,
         boxCount: prev.boxCount,
         bellCount: prev.bellCount,
@@ -175,7 +174,20 @@ export function App() {
   }, []);
 
   const handleToggleBloom = useCallback(() => {
-    setIsBloomActive((prev) => !prev);
+    setSceneState((prev) => (prev === 'QUIET' ? 'BLOOM' : 'QUIET'));
+  }, []);
+
+  const queueSnowBurst = useCallback((nx: number, ny: number) => {
+    const now = performance.now();
+    if (now - lastTapBurstAtRef.current < 160) return;
+    lastTapBurstAtRef.current = now;
+    if (burstQueueRef.current.length < 6) {
+      burstQueueRef.current.push({
+        id: nextBurstIdRef.current++,
+        nx,
+        ny,
+      });
+    }
   }, []);
 
   const handlePhotoUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
@@ -258,7 +270,6 @@ export function App() {
   const handleHandUpdate = useCallback((data: HandData) => {
     handDataRef.current = data;
 
-    // Position screen reticle directly via DOM style to avoid React re-renders
     if (cursorElRef.current) {
       cursorElRef.current.style.left = `${data.x * 100}%`;
       cursorElRef.current.style.top = `${data.y * 100}%`;
@@ -276,6 +287,8 @@ export function App() {
         handDataRef.current = {
           x: 0.5,
           y: 0.5,
+          vx: 0,
+          vy: 0,
           gesture: 'IDLE',
           isPresent: false,
           source: 'mouse',
@@ -294,13 +307,12 @@ export function App() {
       style={{ background: config.bgColor }}
     >
       <HudOverlay
-        mode={mode}
-        onModeChange={setMode}
+        sceneState={sceneState}
+        onSceneStateChange={setSceneState}
         appearance={appearance}
         onSelectAppearance={handleSelectAppearance}
         config={config}
         onConfigPatch={handleConfigPatch}
-        isBloomActive={isBloomActive}
         onToggleBloom={handleToggleBloom}
         isPlaying={isPlaying}
         onTogglePlay={() => setIsPlaying((p) => !p)}
@@ -325,10 +337,14 @@ export function App() {
       />
 
       {handTrackingEnabled && (
-        <HandTracker onHandUpdate={handleHandUpdate} accentColor={config.accentColor} />
+        <HandTracker
+          onHandUpdate={handleHandUpdate}
+          onRequestSceneState={setSceneState}
+          onPointBurst={queueSnowBurst}
+          accentColor={config.accentColor}
+        />
       )}
 
-      {/* Pure 3D viewport: mouse/touch drag strictly rotates/zooms OrbitControls */}
       <div className="w-full h-full">
         <Suspense
           fallback={
@@ -341,15 +357,16 @@ export function App() {
           }
         >
           <ChristmasScene
-            mode={mode}
+            sceneState={sceneState}
             appearance={appearance}
             config={config}
             photos={galleryPhotos}
             audioMetricsRef={audioMetricsRef}
             handDataRef={handDataRef}
-            bloomActiveRef={bloomActiveRef}
+            burstQueueRef={burstQueueRef}
             focusedPhotoId={focusedPhotoId}
             onSelectPhoto={setFocusedPhotoId}
+            onTriggerSkyBurst={queueSnowBurst}
             isLite={isLite}
           />
         </Suspense>

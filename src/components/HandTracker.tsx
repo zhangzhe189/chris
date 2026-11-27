@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Camera, ChevronDown, ChevronUp } from 'lucide-react';
-import type { GestureType, HandData } from '../types';
+import type { GestureType, HandData, SceneState } from '../types';
 
 interface Landmark {
   x: number;
@@ -43,7 +43,7 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
 
 const FINGERTIP_INDICES = [4, 8, 12, 16, 20];
 
-// [mcp, pip, tip] indices for Index, Middle, Ring, Pinky
+// [mcp, pip, tip] for Index, Middle, Ring, Pinky
 const FOUR_FINGERS: Array<[number, number, number]> = [
   [5, 6, 8],
   [9, 10, 12],
@@ -82,26 +82,54 @@ function distAspect(a: Landmark, b: Landmark, aspect: number): number {
 
 interface HandTrackerProps {
   onHandUpdate: (data: HandData) => void;
+  onRequestSceneState: (state: SceneState) => void;
+  onPointBurst: (nx: number, ny: number) => void;
   accentColor: string;
 }
 
 const GESTURE_LABEL: Record<GestureType, string> = {
   IDLE: '请将手放入画面',
-  HOVER: '握拳 · 聚拢',
-  OPEN: '张掌 · 绽放',
-  PINCH: '捏合 · 切图',
+  FIST: '握拳 · 聚拢成树',
+  OPEN: '张掌 · 星光绽放',
+  PINCH: '捏合 · 选中回忆',
+  POINT: '单指 · 雪花光尾',
 };
 
-export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
+/**
+ * 5-gesture AI hand tracker with aspect-corrected finger geometry, hold debounce,
+ * state-lock cooldown, smoothed palm velocity for inertial galaxy exploration,
+ * and single-finger snow-trail burst trigger.
+ */
+export function HandTracker({
+  onHandUpdate,
+  onRequestSceneState,
+  onPointBurst,
+  accentColor,
+}: HandTrackerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const onHandUpdateRef = useRef(onHandUpdate);
+  const onRequestSceneStateRef = useRef(onRequestSceneState);
+  const onPointBurstRef = useRef(onPointBurst);
+  const accentColorRef = useRef(accentColor);
 
-  // Hysteresis & smoothing refs
+  // Hysteresis, smoothing, debounce & state-lock refs
   const isPinchedRef = useRef(false);
   const isOpenRef = useRef(false);
   const missedFramesRef = useRef(0);
-  const smoothPosRef = useRef({ x: 0.5, y: 0.5 });
+  const smoothPointerRef = useRef({ x: 0.5, y: 0.5 });
+  const smoothPalmRef = useRef<{ x: number; y: number; initialized: boolean }>({
+    x: 0.5,
+    y: 0.5,
+    initialized: false,
+  });
+
+  const pendingStateRef = useRef<{ target: SceneState | null; since: number }>({
+    target: null,
+    since: 0,
+  });
+  const stateLockUntilRef = useRef(0);
+  const lastPointBurstAtRef = useRef(0);
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorText, setErrorText] = useState('摄像头不可用');
@@ -109,6 +137,9 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
   const [detectedGesture, setDetectedGesture] = useState<GestureType>('IDLE');
 
   onHandUpdateRef.current = onHandUpdate;
+  onRequestSceneStateRef.current = onRequestSceneState;
+  onPointBurstRef.current = onPointBurst;
+  accentColorRef.current = accentColor;
 
   useEffect(() => {
     let cancelled = false;
@@ -125,23 +156,27 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
       const vw = video?.videoWidth || 640;
       const vh = video?.videoHeight || 480;
       const aspect = vw / Math.max(1, vh);
+      const nowMs = performance.now();
 
       if (!landmarks) {
         missedFramesRef.current += 1;
-        // Clear skeleton immediately when hand leaves frame
         if (canvas) {
           const ctx = canvas.getContext('2d');
           ctx?.clearRect(0, 0, canvas.width, canvas.height);
         }
-        // Hold previous gesture briefly (3 frames ~100ms) to avoid jitter on rapid movement
+        // Hold briefly across rapid-motion single-frame drops
         if (missedFramesRef.current < 4) return;
 
         isPinchedRef.current = false;
         isOpenRef.current = false;
+        smoothPalmRef.current.initialized = false;
+        pendingStateRef.current.target = null;
         setDetectedGesture((prev) => (prev === 'IDLE' ? prev : 'IDLE'));
         onHandUpdateRef.current({
-          x: smoothPosRef.current.x,
-          y: smoothPosRef.current.y,
+          x: smoothPointerRef.current.x,
+          y: smoothPointerRef.current.y,
+          vx: 0,
+          vy: 0,
           gesture: 'IDLE',
           isPresent: false,
           source: 'camera',
@@ -159,28 +194,28 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
       const indexTip = landmarks[8];
       const indexPip = landmarks[6];
 
-      // Robust palm reference (combines length & width so tilted hands stay accurate)
       const palmLen = distAspect(wrist, middleMcp, aspect);
       const palmWidth = distAspect(indexMcp, pinkyMcp, aspect);
       const palmScale = Math.max(0.04, palmLen, palmWidth * 1.15);
 
-      // Count extended non-thumb fingers by comparing tip vs PIP distance from wrist
       let extendedFourCount = 0;
       let otherExtendedCount = 0; // middle, ring, pinky
+      let indexExtended = false;
+
       for (let f = 0; f < FOUR_FINGERS.length; f++) {
         const [mcpIdx, pipIdx, tipIdx] = FOUR_FINGERS[f];
         const tipToWrist = distAspect(landmarks[tipIdx], wrist, aspect);
         const pipToWrist = distAspect(landmarks[pipIdx], wrist, aspect);
         const tipToMcp = distAspect(landmarks[tipIdx], landmarks[mcpIdx], aspect);
 
-        const isExtended = tipToWrist > pipToWrist * 1.09 && tipToMcp > palmScale * 0.44;
-        if (isExtended) {
+        const isExt = tipToWrist > pipToWrist * 1.09 && tipToMcp > palmScale * 0.44;
+        if (isExt) {
           extendedFourCount += 1;
-          if (f > 0) otherExtendedCount += 1;
+          if (f === 0) indexExtended = true;
+          else otherExtendedCount += 1;
         }
       }
 
-      // Distinguish true fist from thumb+index pinch
       const indexTipToWrist = distAspect(indexTip, wrist, aspect);
       const indexPipToWrist = distAspect(indexPip, wrist, aspect);
       const isFist =
@@ -190,7 +225,7 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
 
       const pinchRatio = distAspect(thumbTip, indexTip, aspect) / palmScale;
 
-      // Forgiving hysteresis for pinch (never triggers on closed fist)
+      // 1. Pinch hysteresis (never triggers on closed fist)
       let pinched = isPinchedRef.current;
       if (isFist) {
         pinched = false;
@@ -201,9 +236,13 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
       }
       isPinchedRef.current = pinched;
 
-      // Forgiving hysteresis for open palm
+      // 2. Single-finger point (index extended, middle/ring/pinky curled, thumb away)
+      const isPointing =
+        !pinched && indexExtended && otherExtendedCount === 0 && pinchRatio > 0.64;
+
+      // 3. Open palm hysteresis
       let openPalm = isOpenRef.current;
-      if (pinched) {
+      if (pinched || isFist || isPointing) {
         openPalm = false;
       } else if (openPalm) {
         if (extendedFourCount <= 1) openPalm = false;
@@ -212,9 +251,78 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
       }
       isOpenRef.current = openPalm;
 
-      const gesture: GestureType = pinched ? 'PINCH' : openPalm ? 'OPEN' : 'HOVER';
+      let gesture: GestureType = 'FIST';
+      if (pinched) {
+        gesture = 'PINCH';
+        // Protect state transitions right after pinching so releasing pinch never flips Quiet/Bloom
+        stateLockUntilRef.current = Math.max(stateLockUntilRef.current, nowMs + 680);
+        pendingStateRef.current.target = null;
+      } else if (isPointing) {
+        gesture = 'POINT';
+        pendingStateRef.current.target = null;
+      } else if (openPalm) {
+        gesture = 'OPEN';
+      } else if (isFist || extendedFourCount <= 1) {
+        gesture = 'FIST';
+      } else {
+        // Transitional neutral hand pose (2 fingers): do not trigger state flips
+        gesture = 'OPEN';
+      }
 
-      // Draw mirrored skeleton overlay with live gesture highlight
+      // Hold-confirmation debounce (160ms) + cooldown state lock (750ms) for Quiet <-> Bloom
+      const desiredState: SceneState | null =
+        gesture === 'OPEN' && extendedFourCount >= 3
+          ? 'BLOOM'
+          : gesture === 'FIST' && isFist
+            ? 'QUIET'
+            : null;
+
+      if (desiredState && nowMs > stateLockUntilRef.current) {
+        if (pendingStateRef.current.target !== desiredState) {
+          pendingStateRef.current = { target: desiredState, since: nowMs };
+        } else if (nowMs - pendingStateRef.current.since >= 165) {
+          onRequestSceneStateRef.current(desiredState);
+          stateLockUntilRef.current = nowMs + 750;
+          pendingStateRef.current.target = null;
+        }
+      } else if (!desiredState) {
+        pendingStateRef.current.target = null;
+      }
+
+      // Smooth pointer coordinates (index tip for POINT, thumb-index midpoint otherwise)
+      const rawPointerX = gesture === 'POINT' ? 1 - indexTip.x : 1 - (indexTip.x + thumbTip.x) * 0.5;
+      const rawPointerY = gesture === 'POINT' ? indexTip.y : (indexTip.y + thumbTip.y) * 0.5;
+      smoothPointerRef.current.x += (rawPointerX - smoothPointerRef.current.x) * 0.45;
+      smoothPointerRef.current.y += (rawPointerY - smoothPointerRef.current.y) * 0.45;
+
+      // Single-finger snow-trail burst with 450ms cooldown
+      if (gesture === 'POINT' && nowMs - lastPointBurstAtRef.current > 450) {
+        lastPointBurstAtRef.current = nowMs;
+        onPointBurstRef.current(smoothPointerRef.current.x, smoothPointerRef.current.y);
+      }
+
+      // Compute damped palm velocity (vx, vy) with deadzone for inertial galaxy rotation
+      const rawPalmX = 1 - (wrist.x + middleMcp.x) * 0.5;
+      const rawPalmY = (wrist.y + middleMcp.y) * 0.5;
+      let vx = 0;
+      let vy = 0;
+
+      if (!smoothPalmRef.current.initialized) {
+        smoothPalmRef.current = { x: rawPalmX, y: rawPalmY, initialized: true };
+      } else {
+        const nextPalmX = smoothPalmRef.current.x + (rawPalmX - smoothPalmRef.current.x) * 0.38;
+        const nextPalmY = smoothPalmRef.current.y + (rawPalmY - smoothPalmRef.current.y) * 0.38;
+        const dx = nextPalmX - smoothPalmRef.current.x;
+        const dy = nextPalmY - smoothPalmRef.current.y;
+        smoothPalmRef.current.x = nextPalmX;
+        smoothPalmRef.current.y = nextPalmY;
+
+        // Deadzone avoids micro-drift while holding hand still
+        vx = Math.abs(dx) > 0.0038 ? Math.max(-0.075, Math.min(0.075, dx)) : 0;
+        vy = Math.abs(dy) > 0.0045 ? Math.max(-0.05, Math.min(0.05, dy)) : 0;
+      }
+
+      // Draw mirrored skeleton overlay with subtle per-gesture styling
       if (canvas && video && video.videoWidth > 0) {
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth;
@@ -229,11 +337,13 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
 
           ctx.strokeStyle =
             gesture === 'PINCH'
-              ? 'rgba(255, 107, 120, 0.92)'
-              : gesture === 'OPEN'
-                ? 'rgba(255, 224, 140, 0.95)'
-                : 'rgba(130, 230, 185, 0.85)';
-          ctx.lineWidth = 2.4;
+              ? 'rgba(229, 138, 153, 0.92)'
+              : gesture === 'POINT'
+                ? 'rgba(245, 232, 207, 0.95)'
+                : gesture === 'OPEN'
+                  ? 'rgba(216, 183, 123, 0.92)'
+                  : 'rgba(137, 212, 178, 0.85)';
+          ctx.lineWidth = 2.2;
           ctx.beginPath();
           for (const [a, b] of HAND_CONNECTIONS) {
             const p1 = landmarks[a];
@@ -243,10 +353,9 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
           }
           ctx.stroke();
 
-          // Visual pinch bridge between thumb & index tips when pinching
           if (gesture === 'PINCH') {
-            ctx.strokeStyle = '#ff4d6d';
-            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#e58a99';
+            ctx.lineWidth = 3.6;
             ctx.beginPath();
             ctx.moveTo(thumbTip.x * canvas.width, thumbTip.y * canvas.height);
             ctx.lineTo(indexTip.x * canvas.width, indexTip.y * canvas.height);
@@ -256,31 +365,31 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
           for (let i = 0; i < landmarks.length; i++) {
             const pt = landmarks[i];
             const isTip = FINGERTIP_INDICES.includes(i);
-            ctx.fillStyle = isTip
-              ? gesture === 'PINCH' && (i === 4 || i === 8)
-                ? '#ff4d6d'
-                : '#ffd98a'
-              : '#ffffff';
+            const highlightTip =
+              (gesture === 'POINT' && i === 8) ||
+              (gesture === 'PINCH' && (i === 4 || i === 8));
+            ctx.fillStyle = highlightTip ? '#f5e8cf' : isTip ? accentColorRef.current : '#ffffff';
             ctx.beginPath();
-            ctx.arc(pt.x * canvas.width, pt.y * canvas.height, isTip ? 4.2 : 2.6, 0, Math.PI * 2);
+            ctx.arc(
+              pt.x * canvas.width,
+              pt.y * canvas.height,
+              highlightTip ? 5.2 : isTip ? 3.8 : 2.4,
+              0,
+              Math.PI * 2
+            );
             ctx.fill();
           }
           ctx.restore();
         }
       }
 
-      // Smooth pointer coordinates (EMA) to eliminate reticle jitter
-      const rawX = 1 - (indexTip.x + thumbTip.x) * 0.5;
-      const rawY = (indexTip.y + thumbTip.y) * 0.5;
-      const alpha = 0.45;
-      smoothPosRef.current.x += (rawX - smoothPosRef.current.x) * alpha;
-      smoothPosRef.current.y += (rawY - smoothPosRef.current.y) * alpha;
-
       setDetectedGesture((prev) => (prev === gesture ? prev : gesture));
 
       onHandUpdateRef.current({
-        x: smoothPosRef.current.x,
-        y: smoothPosRef.current.y,
+        x: smoothPointerRef.current.x,
+        y: smoothPointerRef.current.y,
+        vx,
+        vy,
         gesture,
         isPresent: true,
         source: 'camera',
@@ -319,7 +428,6 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
         hands = new window.Hands({
           locateFile: (file: string) => `./mediapipe/hands/${file}`,
         });
-        // modelComplexity: 0 uses the lightweight high-FPS model (~20-30 FPS in browser WASM)
         hands.setOptions({
           maxNumHands: 1,
           modelComplexity: 0,
@@ -340,7 +448,6 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
 
           const v = videoRef.current;
           if (!v || !hands || sending || v.paused || v.readyState < 2) return;
-          // Target ~25-30 FPS inference without starving WebGL frames
           if (now - lastSentAt < 34 || v.currentTime === lastVideoTime) return;
 
           lastVideoTime = v.currentTime;
@@ -388,6 +495,8 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
       onHandUpdateRef.current({
         x: 0.5,
         y: 0.5,
+        vx: 0,
+        vy: 0,
         gesture: 'IDLE',
         isPresent: false,
         source: 'camera',
@@ -403,7 +512,7 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
         }`}
         style={{
           background: 'rgba(8, 12, 26, 0.92)',
-          borderColor: `${accentColor}55`,
+          borderColor: `${accentColor}48`,
         }}
       >
         {status !== 'ready' && (
@@ -428,15 +537,17 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
           <div
             className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between px-2 py-0.5 rounded-md text-[10px] font-medium backdrop-blur-md"
             style={{
-              background: 'rgba(8, 12, 26, 0.72)',
+              background: 'rgba(8, 12, 26, 0.76)',
               color:
                 detectedGesture === 'PINCH'
-                  ? '#ff7a8a'
-                  : detectedGesture === 'OPEN'
-                    ? accentColor
-                    : detectedGesture === 'HOVER'
-                      ? '#7ee8b4'
-                      : 'rgba(255,255,255,0.65)',
+                  ? '#e58a99'
+                  : detectedGesture === 'POINT'
+                    ? '#F5E8CF'
+                    : detectedGesture === 'OPEN'
+                      ? accentColor
+                      : detectedGesture === 'FIST'
+                        ? '#89d4b2'
+                        : 'rgba(255,255,255,0.6)',
             }}
           >
             <span>{GESTURE_LABEL[detectedGesture]}</span>
@@ -450,8 +561,8 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
         onClick={() => setPreviewExpanded((prev) => !prev)}
         className="flex items-center gap-2 px-3 py-1.5 rounded-full border backdrop-blur-md transition-all cursor-pointer text-[11px] font-medium"
         style={{
-          background: previewExpanded ? 'rgba(18, 24, 48, 0.85)' : 'rgba(10, 14, 30, 0.7)',
-          borderColor: previewExpanded ? `${accentColor}99` : `${accentColor}40`,
+          background: previewExpanded ? 'rgba(14, 20, 38, 0.85)' : 'rgba(8, 13, 27, 0.72)',
+          borderColor: previewExpanded ? `${accentColor}88` : `${accentColor}38`,
           color: accentColor,
         }}
       >

@@ -26,7 +26,7 @@ import type {
   GalleryPhoto,
   GestureType,
   SceneConfig,
-  TreeMode,
+  SceneState,
 } from '../types';
 
 interface CountdownState {
@@ -189,13 +189,12 @@ function AppearanceThumbnailArt({ item }: { item: AppearanceConfig }) {
 type ActivePanel = 'none' | 'appearance' | 'album' | 'settings';
 
 interface HudOverlayProps {
-  mode: TreeMode;
-  onModeChange: (mode: TreeMode) => void;
+  sceneState: SceneState;
+  onSceneStateChange: (state: SceneState) => void;
   appearance: AppearanceConfig;
   onSelectAppearance: (id: AppearanceId) => void;
   config: SceneConfig;
   onConfigPatch: (patch: Partial<SceneConfig>) => void;
-  isBloomActive: boolean;
   onToggleBloom: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
@@ -220,13 +219,12 @@ interface HudOverlayProps {
 }
 
 export function HudOverlay({
-  mode,
-  onModeChange,
+  sceneState,
+  onSceneStateChange,
   appearance,
   onSelectAppearance,
   config,
   onConfigPatch,
-  isBloomActive,
   onToggleBloom,
   isPlaying,
   onTogglePlay,
@@ -273,16 +271,20 @@ export function HudOverlay({
     onSelectPhoto(photos[nextIdx].id);
   };
 
-  const isBloomedVisual = isBloomActive || (handTrackingEnabled && gesture === 'OPEN');
+  const isBloomedVisual = sceneState === 'BLOOM';
 
   const gestureStatusText =
     gesture === 'OPEN'
       ? '张掌 · 星光绽放'
       : gesture === 'PINCH'
-        ? '捏合 · 切换回忆'
-        : isHandPresent
-          ? '握拳 · 静谧聚拢'
-          : '等待手部进入画面';
+        ? '捏合 · 选中回忆'
+        : gesture === 'POINT'
+          ? '单指 · 雪花光尾'
+          : gesture === 'FIST'
+            ? '握拳 · 聚拢成树'
+            : isHandPresent
+              ? '移动手掌 · 探索星河'
+              : '等待手部进入画面';
 
   const topIconBaseStyle = (active: boolean) => ({
     background: active ? `${accent}1e` : ui.dockBg,
@@ -563,25 +565,25 @@ export function HudOverlay({
               </div>
             </section>
 
-            {/* Display Mode */}
+            {/* Scene State (Quiet <-> Bloom) */}
             <section className="space-y-2.5">
               <div className="text-[11px] tracking-[0.18em] font-medium pb-1 border-b border-white/10 text-white/55">
-                空间形态
+                空间状态
               </div>
               <div className="flex gap-2">
                 {(
                   [
-                    { id: 'TREE', label: '静谧树形' },
-                    { id: 'FLOAT', label: '星河漂浮' },
+                    { id: 'QUIET', label: '静谧树形' },
+                    { id: 'BLOOM', label: '星河绽放' },
                   ] as const
                 ).map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => onModeChange(item.id)}
+                    onClick={() => onSceneStateChange(item.id)}
                     className="flex-1 py-2 rounded-xl text-xs border transition-all cursor-pointer"
                     style={
-                      mode === item.id
+                      sceneState === item.id
                         ? {
                             background: `${accent}1f`,
                             borderColor: `${accent}78`,
@@ -704,9 +706,9 @@ export function HudOverlay({
             {/* Concise interaction note inside Settings only (never clutters main viewport) */}
             <section className="rounded-xl p-3 border border-white/8 bg-white/[0.025] text-[10.5px] leading-relaxed text-white/50 space-y-1">
               <div className="font-medium text-white/70 mb-1">交互指南</div>
-              <div>· 拖拽旋转视角，滚轮 / 双指缩放</div>
-              <div>· 点击 3D 拍立得即可居中放大浏览</div>
-              <div>· 手势：张掌绽放 / 握拳聚拢 / 捏合切图</div>
+              <div>· 拖拽旋转，滚轮 / 双指缩放，轻点夜空触发雪花光尾</div>
+              <div>· 点击 3D 拍立得居中放大浏览，按 Esc 收回</div>
+              <div>· 手势：单指点雪花 / 张掌绽放 / 握拳聚拢 / 移动掌心旋转 / 捏合选中</div>
             </section>
           </div>
         </aside>

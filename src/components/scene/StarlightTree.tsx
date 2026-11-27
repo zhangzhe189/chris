@@ -1,20 +1,18 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { AudioMetrics, HandData, TreeMode } from '../../types';
+import type { AudioMetrics } from '../../types';
 import { TREE_HEIGHT, TREE_RADIUS, TREE_TOP_Y } from './constants';
 
 interface StarlightTreeProps {
-  mode: TreeMode;
+  bloomProgressRef: MutableRefObject<number>;
   audioMetricsRef: MutableRefObject<AudioMetrics>;
-  handDataRef: MutableRefObject<HandData>;
   count: number;
   color1: string;
   color2: string;
   starColor: string;
   twinkleIntensity?: number;
-  bloomActiveRef: MutableRefObject<boolean>;
 }
 
 function createStarGeometry(): THREE.ExtrudeGeometry {
@@ -43,25 +41,31 @@ function createStarGeometry(): THREE.ExtrudeGeometry {
   return geo;
 }
 
+/**
+ * 3D Particle Christmas Tree with smooth continuous morph between:
+ * - Quiet Mode (bloomProgress = 0): Complete layered evergreen silhouette.
+ * - Bloom Mode (bloomProgress = 1): Ordered 3-tier tilted 3D celestial orbital galaxy
+ *   with continuous spiral unwinding & rewinding trajectories and depth-scaled sparkle.
+ */
 export function StarlightTree({
-  mode,
+  bloomProgressRef,
   audioMetricsRef,
-  handDataRef,
   count,
   color1,
   color2,
   starColor,
   twinkleIntensity = 0.24,
-  bloomActiveRef,
 }: StarlightTreeProps) {
+  const { camera } = useThree();
   const meshRef = useRef<THREE.InstancedMesh | null>(null);
   const starRef = useRef<THREE.Mesh | null>(null);
   const starMatRef = useRef<THREE.MeshStandardMaterial | null>(null);
   const starLightRef = useRef<THREE.PointLight | null>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const starGeo = useMemo(() => createStarGeometry(), []);
+  const introRef = useRef(0);
 
-  // Smooth color crossfade refs for Appearance transitions
+  // Smooth Appearance color crossfade refs
   const curC1 = useRef(new THREE.Color(color1));
   const curC2 = useRef(new THREE.Color(color2));
   const curStar = useRef(new THREE.Color(starColor));
@@ -73,22 +77,31 @@ export function StarlightTree({
 
   const data = useMemo(() => {
     const tree = new Float32Array(count * 3);
-    const random = new Float32Array(count * 3);
-    const current = new Float32Array(count * 3);
-    const explosion = new Float32Array(count * 3);
+    const introOffset = new Float32Array(count * 3);
+
+    // Ordered 3-tier orbital parameters for Bloom mode
+    const orbitRadius = new Float32Array(count);
+    const orbitAngle0 = new Float32Array(count);
+    const orbitSpeed = new Float32Array(count);
+    const orbitBandY = new Float32Array(count);
+    const orbitTiltSin = new Float32Array(count);
+    const orbitTiltCos = new Float32Array(count);
+    const swirlSign = new Float32Array(count);
+
     const twinkleSpeed = new Float32Array(count);
     const twinklePhase = new Float32Array(count);
     const baseSizes = new Float32Array(count);
     const colorMix = new Float32Array(count);
 
     const tiers = 9;
+    const orbitTilts = [0.24, -0.19, 0.12]; // 3 distinct inclined orbital planes
+
     for (let i = 0; i < count; i++) {
-      // Skew slightly denser toward lower/mid canopy for full evergreen silhouette
+      // Quiet mode: layered conifer silhouette
       const hNorm = Math.pow(Math.random(), 1.18);
       const y = hNorm * TREE_HEIGHT - TREE_HEIGHT / 2;
       const tierWave = 0.88 + 0.16 * (1 - ((hNorm * tiers) % 1));
       const maxR = Math.pow(1 - hNorm, 1.05) * TREE_RADIUS * tierWave;
-      // Bias points toward outer shell while retaining lush interior glow
       const shellFactor = 0.35 + 0.65 * Math.sqrt(Math.random());
       const r = maxR * shellFactor;
       const angle = Math.random() * Math.PI * 2;
@@ -101,29 +114,33 @@ export function StarlightTree({
       tree[i * 3 + 1] = ty;
       tree[i * 3 + 2] = tz;
 
-      // Floating galaxy nebula position
-      const fRadius = 6 + Math.random() * 14;
-      const fTheta = Math.random() * Math.PI * 2;
-      const fPhi = Math.acos(2 * Math.random() - 1);
-      random[i * 3] = fRadius * Math.sin(fPhi) * Math.cos(fTheta);
-      random[i * 3 + 1] = (Math.random() - 0.5) * 16;
-      random[i * 3 + 2] = fRadius * Math.sin(fPhi) * Math.sin(fTheta);
+      // Gentle mount-gather starting offset
+      const initR = r + 4.8 + Math.random() * 5.2;
+      const initAngle = angle + 1.1;
+      introOffset[i * 3] = Math.cos(initAngle) * initR - tx;
+      introOffset[i * 3 + 1] = (Math.random() - 0.5) * 4.5;
+      introOffset[i * 3 + 2] = Math.sin(initAngle) * initR - tz;
 
-      // Start slightly dispersed so initial mount smoothly gathers into the tree
-      const initR = r + 5.5 + Math.random() * 7;
-      const initAngle = angle + 1.4;
-      current[i * 3] = Math.cos(initAngle) * initR;
-      current[i * 3 + 1] = ty + (Math.random() - 0.5) * 6;
-      current[i * 3 + 2] = Math.sin(initAngle) * initR;
+      // Bloom mode: structured 3-layer spiral galaxy orbits
+      const layer = i % 10 < 3 ? 0 : i % 10 < 7 ? 1 : 2;
+      const armIndex = i % 3;
+      const armOffset = (armIndex / 3) * Math.PI * 2;
 
-      const dir = new THREE.Vector3(
-        tx + (Math.random() - 0.5) * 1.5,
-        ty * 0.35 + (Math.random() - 0.5) * 2.5,
-        tz + (Math.random() - 0.5) * 1.5
-      ).normalize();
-      explosion[i * 3] = dir.x;
-      explosion[i * 3 + 1] = dir.y;
-      explosion[i * 3 + 2] = dir.z;
+      const layerMinR = layer === 0 ? 5.2 : layer === 1 ? 8.2 : 11.8;
+      const layerSpan = layer === 0 ? 2.8 : layer === 1 ? 3.8 : 4.6;
+      const oR = layerMinR + Math.random() * layerSpan;
+      // Spiral arm twist proportional to orbital radius
+      const spiralTwist = oR * 0.34 + (Math.random() - 0.5) * 0.65;
+
+      orbitRadius[i] = oR;
+      orbitAngle0[i] = armOffset + spiralTwist;
+      orbitSpeed[i] = layer === 0 ? 0.22 : layer === 1 ? 0.14 : 0.085;
+      orbitBandY[i] = (hNorm - 0.5) * (layer === 0 ? 4.4 : layer === 1 ? 3.2 : 5.4) + (Math.random() - 0.5) * 0.85;
+
+      const tilt = orbitTilts[layer];
+      orbitTiltSin[i] = Math.sin(tilt);
+      orbitTiltCos[i] = Math.cos(tilt);
+      swirlSign[i] = layer === 1 ? -1 : 1;
 
       twinkleSpeed[i] = 1.2 + Math.random() * 2.8;
       twinklePhase[i] = Math.random() * Math.PI * 2;
@@ -133,9 +150,14 @@ export function StarlightTree({
 
     return {
       tree,
-      random,
-      current,
-      explosion,
+      introOffset,
+      orbitRadius,
+      orbitAngle0,
+      orbitSpeed,
+      orbitBandY,
+      orbitTiltSin,
+      orbitTiltCos,
+      swirlSign,
       twinkleSpeed,
       twinklePhase,
       baseSizes,
@@ -143,7 +165,6 @@ export function StarlightTree({
     };
   }, [count]);
 
-  // Trigger smooth color crossfade whenever theme/colors or count change
   useEffect(() => {
     tgtC1.current.set(color1);
     tgtC2.current.set(color2);
@@ -159,10 +180,19 @@ export function StarlightTree({
     const time = state.clock.getElapsedTime();
     const audioLevel = audioMetricsRef.current.level;
     const bass = audioMetricsRef.current.bassEnergy;
-    const isBlooming =
-      handDataRef.current.gesture === 'OPEN' || bloomActiveRef.current;
 
-    // Smoothly interpolate particle & star colors during Appearance transitions
+    // Initial gentle mount convergence (1 -> 0 over ~1.4s)
+    if (introRef.current < 1) {
+      introRef.current = Math.min(1, introRef.current + delta * 0.72);
+    }
+    const introRemain = Math.pow(1 - introRef.current, 3);
+
+    // Smoothly eased Quiet <-> Bloom orbital morph progress (0..1)
+    const p = bloomProgressRef.current;
+    const ease = p * p * (3 - 2 * p);
+    const transitArc = Math.sin(ease * Math.PI); // peaks at mid-transition for graceful spiral swirl
+
+    // Smoothly crossfade particle & star colors during Appearance transitions
     if (!colorSettledRef.current) {
       const step = Math.min(1, delta * 4.2);
       curC1.current.lerp(tgtC1.current, step);
@@ -202,54 +232,82 @@ export function StarlightTree({
     }
 
     if (starRef.current) {
-      starRef.current.rotation.y += delta * 0.85;
-      const starScale = 1 + Math.sin(time * 2.4) * 0.08 + bass * 0.28;
+      starRef.current.rotation.y += delta * (0.75 + ease * 0.45);
+      const starScale = (1 + Math.sin(time * 2.4) * 0.08 + bass * 0.25) * (1 - ease * 0.12);
       starRef.current.scale.setScalar(starScale);
-      // Slightly lift topper when blooming
-      const targetStarY =
-        mode === 'TREE' ? TREE_TOP_Y + 0.72 + (isBlooming ? 1.4 : 0) : TREE_TOP_Y + 2.2;
-      starRef.current.position.y += (targetStarY - starRef.current.position.y) * delta * 3;
+      // In Bloom mode, star gracefully descends toward the luminous galaxy core
+      const targetStarY = THREE.MathUtils.lerp(TREE_TOP_Y + 0.72, 0.35, ease);
+      starRef.current.position.y += (targetStarY - starRef.current.position.y) * Math.min(1, delta * 4);
     }
 
     if (starLightRef.current) {
-      starLightRef.current.intensity = 10 + Math.sin(time * 2.8) * 2.2 + bass * 10;
+      starLightRef.current.position.y = starRef.current ? starRef.current.position.y + 0.35 : TREE_TOP_Y + 1;
+      starLightRef.current.intensity = 9.5 + Math.sin(time * 2.6) * 2.0 + bass * 9;
     }
 
-    const explosionDist = 9.5;
-    const lerpRate = Math.min(1, (isBlooming ? 4.2 : 2.3) * delta);
-    const { tree, random, current, explosion, twinkleSpeed, twinklePhase, baseSizes } = data;
+    const camX = camera.position.x;
+    const camZ = camera.position.z;
+    const {
+      tree,
+      introOffset,
+      orbitRadius,
+      orbitAngle0,
+      orbitSpeed,
+      orbitBandY,
+      orbitTiltSin,
+      orbitTiltCos,
+      swirlSign,
+      twinkleSpeed,
+      twinklePhase,
+      baseSizes,
+    } = data;
 
     for (let i = 0; i < count; i++) {
       const idx = i * 3;
-      let tx = mode === 'TREE' ? tree[idx] : random[idx];
-      let ty = mode === 'TREE' ? tree[idx + 1] : random[idx + 1];
-      let tz = mode === 'TREE' ? tree[idx + 2] : random[idx + 2];
+      const tx = tree[idx] + introOffset[idx] * introRemain;
+      const ty = tree[idx + 1] + introOffset[idx + 1] * introRemain;
+      const tz = tree[idx + 2] + introOffset[idx + 2] * introRemain;
 
-      if (isBlooming) {
-        const amp = 1 + audioLevel * 0.55;
-        tx += explosion[idx] * explosionDist * amp;
-        ty += explosion[idx + 1] * explosionDist * amp;
-        tz += explosion[idx + 2] * explosionDist * amp;
-      }
+      let px = tx;
+      let py = ty;
+      let pz = tz;
+      let depthScale = 1;
 
-      current[idx] += (tx - current[idx]) * lerpRate;
-      current[idx + 1] += (ty - current[idx + 1]) * lerpRate;
-      current[idx + 2] += (tz - current[idx + 2]) * lerpRate;
+      if (ease > 0.0005) {
+        // Compute ordered 3D tilted orbital position
+        const ang = orbitAngle0[i] + time * orbitSpeed[i] * swirlSign[i];
+        const r = orbitRadius[i];
+        const rawX = Math.cos(ang) * r;
+        const rawZ = Math.sin(ang) * r;
+        const rawY = orbitBandY[i] + Math.sin(time * 0.65 + twinklePhase[i]) * 0.28;
 
-      let px = current[idx];
-      let py = current[idx + 1];
-      const pz = current[idx + 2];
+        // Apply orbital plane inclination around X axis
+        const ox = rawX;
+        const oy = rawY * orbitTiltCos[i] - rawZ * orbitTiltSin[i];
+        const oz = rawY * orbitTiltSin[i] + rawZ * orbitTiltCos[i];
 
-      if (mode === 'FLOAT' && !isBlooming) {
-        py += Math.sin(time * 0.9 + i) * 0.04;
-        px += Math.cos(time * 0.5 + i) * 0.03;
+        // Blend along a continuous swirling spiral trajectory (no jagged linear snap)
+        const bx = tx + (ox - tx) * ease;
+        const by = ty + (oy - ty) * ease;
+        const bz = tz + (oz - tz) * ease;
+
+        const swirlAngle = transitArc * 0.95 * swirlSign[i];
+        const cs = Math.cos(swirlAngle);
+        const sn = Math.sin(swirlAngle);
+        px = bx * cs - bz * sn;
+        py = by;
+        pz = bx * sn + bz * cs;
+
+        // Subtle perspective depth-scaling so foreground orbital stars feel closer & richer
+        const distToCam = Math.hypot(px - camX, pz - camZ);
+        const depthNorm = THREE.MathUtils.clamp(1.22 - distToCam / 46, 0.58, 1.24);
+        depthScale = THREE.MathUtils.lerp(1, depthNorm, ease);
       }
 
       const twinkle =
         1 - twinkleIntensity + twinkleIntensity * Math.sin(time * twinkleSpeed[i] + twinklePhase[i]);
-      const beatScale =
-        mode === 'TREE' && i % 9 === 0 ? 1 + bass * 1.4 : 1 + audioLevel * 0.45;
-      const scale = baseSizes[i] * twinkle * beatScale;
+      const beatScale = i % 9 === 0 ? 1 + bass * 1.2 : 1 + audioLevel * 0.4;
+      const scale = baseSizes[i] * twinkle * beatScale * depthScale;
 
       dummy.position.set(px, py, pz);
       dummy.scale.setScalar(scale);

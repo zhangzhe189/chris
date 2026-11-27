@@ -1,9 +1,7 @@
-export type TreeMode = 'TREE' | 'FLOAT';
-
-/** Independent scene state reserved for Phase 3 Quiet <-> Ordered Orbital Bloom */
+/** Independent scene state: Quiet (complete tree) vs Bloom (ordered 3D orbital galaxy) */
 export type SceneState = 'QUIET' | 'BLOOM';
 
-export type GestureType = 'IDLE' | 'HOVER' | 'OPEN' | 'PINCH';
+export type GestureType = 'IDLE' | 'FIST' | 'OPEN' | 'PINCH' | 'POINT';
 
 export type AppearanceId = 'midnight-glow' | 'vintage-noel' | 'memory-galaxy';
 
@@ -13,11 +11,25 @@ export type ThemeId = AppearanceId;
 export type OrnamentStyle = 'velvet' | 'vintage' | 'crystal';
 
 export interface HandData {
+  /** Normalized 0..1 mirrored screen X */
   x: number;
+  /** Normalized 0..1 screen Y */
   y: number;
+  /** Smoothed frame delta X for inertial galaxy exploration */
+  vx: number;
+  /** Smoothed frame delta Y for subtle pitch exploration */
+  vy: number;
   gesture: GestureType;
   isPresent: boolean;
   source: 'camera' | 'mouse';
+}
+
+export interface SnowBurstRequest {
+  id: number;
+  /** Normalized screen X in [0..1] */
+  nx: number;
+  /** Normalized screen Y in [0..1] */
+  ny: number;
 }
 
 export interface AudioMetrics {
@@ -30,25 +42,21 @@ export interface AudioMetrics {
 }
 
 export interface AppearanceSpaceConfig {
-  /** Far layer: deep sky zenith & horizon colors + slow stardust */
   skyZenith: string;
   skyHorizon: string;
   farDustColor1: string;
   farDustColor2: string;
   farDustSpeed: number;
   farDustOpacity: number;
-  /** Midground layer: soft breathing atmospheric mist / nebula */
   nebulaPrimary: string;
   nebulaSecondary: string;
   nebulaWarmCore: string;
   nebulaOpacity: number;
   nebulaDriftSpeed: number;
   nebulaBreathSpeed: number;
-  /** Foreground layer: fine snow + defocused near bokeh */
   snowColor: string;
   bokehWarmColor: string;
   snowFallMultiplier: number;
-  /** Ground layer: elliptical feathered halo & scattered ground shimmer */
   groundCoreColor: string;
   groundMidColor: string;
   groundEmberColor: string;
@@ -73,7 +81,6 @@ export interface AppearanceLightingConfig {
   bloomIntensity: number;
   bloomRadius: number;
   vignetteDarkness: number;
-  /** Enables subtle organic warm candle flicker (Vintage Noel) */
   candleFlicker: boolean;
 }
 
@@ -102,7 +109,6 @@ export interface AppearanceMotionConfig {
 
 export interface AppearanceFeaturesConfig {
   ornamentStyle: OrnamentStyle;
-  /** Multi-layer tilted celestial rings around tree (Memory Galaxy) */
   orbitalRings: boolean;
   orbitalRingPrimary: string;
   orbitalRingSecondary: string;

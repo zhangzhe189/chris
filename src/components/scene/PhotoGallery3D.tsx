@@ -7,6 +7,7 @@ import type { AppearanceFeaturesConfig, GalleryPhoto, HandData } from '../../typ
 
 interface PhotoGallery3DProps {
   photos: GalleryPhoto[];
+  bloomProgressRef: MutableRefObject<number>;
   handDataRef: MutableRefObject<HandData>;
   focusedPhotoId: string | null;
   onSelectPhoto: (id: string | null) => void;
@@ -20,10 +21,24 @@ interface PhotoGallery3DProps {
 
 interface PolaroidPlacement {
   photo: GalleryPhoto;
-  initialPos: THREE.Vector3;
-  initialRot: THREE.Euler;
+  quietPos: THREE.Vector3;
+  quietRot: THREE.Euler;
+  /** Layered 3D orbital parameters when in Bloom Mode */
+  bloomRadius: number;
+  bloomAngle0: number;
+  bloomOrbitSpeed: number;
+  bloomY: number;
+  bloomTilt: number;
   tiltZ: number;
   phase: number;
+}
+
+interface CardRuntimeHandles {
+  group: THREE.Group;
+  bodyMat: THREE.MeshStandardMaterial | null;
+  frontMat: THREE.MeshStandardMaterial | null;
+  backMat: THREE.MeshStandardMaterial | null;
+  clipMat: THREE.MeshStandardMaterial | null;
 }
 
 function createPolaroidFrontTexture(
@@ -42,29 +57,24 @@ function createPolaroidFrontTexture(
   const ctx = canvas.getContext('2d');
 
   if (ctx) {
-    // Theme-harmonized Polaroid paper gradient
     const paperGrad = ctx.createLinearGradient(0, 0, width, height);
     paperGrad.addColorStop(0, style.polaroidPaperTop);
     paperGrad.addColorStop(1, style.polaroidPaperBottom);
     ctx.fillStyle = paperGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // Subtle themed outer border sheen
     ctx.strokeStyle = style.polaroidBorderTint;
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, width - 4, height - 4);
 
-    // Photo window dimensions
     const padX = 34;
     const padTop = 36;
-    const boxSize = width - padX * 2; // 444 x 444
+    const boxSize = width - padX * 2;
 
-    // Photo recess shadow
     ctx.fillStyle = '#14192b';
     ctx.fillRect(padX, padTop, boxSize, boxSize);
 
     if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-      // Center-crop (object-fit: cover) so any aspect ratio looks balanced
       const iw = img.naturalWidth;
       const ih = img.naturalHeight;
       const scale = Math.max(boxSize / iw, boxSize / ih);
@@ -81,19 +91,16 @@ function createPolaroidFrontTexture(
       ctx.restore();
     }
 
-    // Crisp inner hairline around photo
     ctx.strokeStyle = 'rgba(30, 24, 18, 0.14)';
     ctx.lineWidth = 2;
     ctx.strokeRect(padX, padTop, boxSize, boxSize);
 
-    // Handwritten caption in bottom Polaroid chin
     ctx.fillStyle = style.polaroidCaptionColor;
     ctx.font = 'italic 600 32px "Caveat", "Noto Serif SC", Georgia, serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(caption || 'Winter Memory', width / 2, padTop + boxSize + 72, boxSize);
 
-    // Tiny decorative dot under caption
     ctx.fillStyle = style.polaroidBorderTint;
     ctx.beginPath();
     ctx.arc(width / 2, padTop + boxSize + 112, 3.5, 0, Math.PI * 2);
@@ -122,7 +129,6 @@ function createPolaroidBackTexture(): THREE.CanvasTexture {
     ctx.lineWidth = 4;
     ctx.strokeRect(12, 12, width - 24, height - 24);
 
-    // Minimalist golden snowflake emblem on the back
     ctx.save();
     ctx.translate(width / 2, height / 2);
     ctx.strokeStyle = 'rgba(186, 140, 68, 0.55)';
@@ -157,7 +163,7 @@ interface PolaroidCardProps {
   >;
   isFocused: boolean;
   onToggleFocus: (id: string) => void;
-  registerGroup: (id: string, group: THREE.Group | null) => void;
+  registerHandles: (id: string, handles: CardRuntimeHandles | null) => void;
 }
 
 function PolaroidCard({
@@ -167,12 +173,31 @@ function PolaroidCard({
   polaroidStyle,
   isFocused,
   onToggleFocus,
-  registerGroup,
+  registerHandles,
 }: PolaroidCardProps) {
+  const groupRef = useRef<THREE.Group | null>(null);
+  const bodyMatRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const frontMatRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const backMatRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const clipMatRef = useRef<THREE.MeshStandardMaterial | null>(null);
+
   const [frontTexture, setFrontTexture] = useState<THREE.CanvasTexture>(() =>
     createPolaroidFrontTexture(null, placement.photo.caption, polaroidStyle)
   );
   const [hovered, setHovered] = useState(false);
+
+  useEffect(() => {
+    if (groupRef.current) {
+      registerHandles(placement.photo.id, {
+        group: groupRef.current,
+        bodyMat: bodyMatRef.current,
+        frontMat: frontMatRef.current,
+        backMat: backMatRef.current,
+        clipMat: clipMatRef.current,
+      });
+    }
+    return () => registerHandles(placement.photo.id, null);
+  }, [placement.photo.id, registerHandles]);
 
   useEffect(() => {
     let active = true;
@@ -222,9 +247,9 @@ function PolaroidCard({
 
   return (
     <group
-      ref={(el) => registerGroup(placement.photo.id, el)}
-      position={placement.initialPos}
-      rotation={placement.initialRot}
+      ref={groupRef}
+      position={placement.quietPos}
+      rotation={placement.quietRot}
       onClick={handleClick}
       onPointerOver={(e) => {
         e.stopPropagation();
@@ -232,51 +257,69 @@ function PolaroidCard({
       }}
       onPointerOut={() => setHovered(false)}
     >
-      {/* Polaroid card body (warm cream edge) */}
       <mesh>
         <boxGeometry args={[1.38, 1.7, 0.036]} />
         <meshStandardMaterial
+          ref={bodyMatRef}
           color="#f6efe0"
           roughness={0.78}
           metalness={0.04}
+          transparent
+          opacity={1}
           emissive={isFocused || hovered ? accentColor : '#000000'}
           emissiveIntensity={isFocused ? 0.14 : hovered ? 0.09 : 0}
         />
       </mesh>
 
-      {/* Front photo + caption face */}
       <mesh position={[0, 0, 0.02]}>
         <planeGeometry args={[1.36, 1.68]} />
         <meshStandardMaterial
+          ref={frontMatRef}
           map={frontTexture}
           roughness={0.62}
           metalness={0.02}
+          transparent
+          opacity={1}
           toneMapped={false}
         />
       </mesh>
 
-      {/* Back side card with subtle golden snowflake */}
       <mesh position={[0, 0, -0.02]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[1.36, 1.68]} />
-        <meshStandardMaterial map={backTexture} roughness={0.82} metalness={0.04} />
+        <meshStandardMaterial
+          ref={backMatRef}
+          map={backTexture}
+          roughness={0.82}
+          metalness={0.04}
+          transparent
+          opacity={1}
+        />
       </mesh>
 
-      {/* Delicate golden clip pin on top of the Polaroid */}
       <mesh position={[0, 0.87, 0]}>
         <boxGeometry args={[0.24, 0.09, 0.07]} />
         <meshStandardMaterial
+          ref={clipMatRef}
           color={accentColor}
-          metalness={0.95}
+          metalness={0.92}
           roughness={0.18}
-          envMapIntensity={2}
+          envMapIntensity={1.8}
+          transparent
+          opacity={1}
         />
       </mesh>
     </group>
   );
 }
 
+/**
+ * 3D Polaroid gallery that nests gracefully around the tree in Quiet Mode,
+ * expands onto multi-layered tilted 3D orbits with perspective depth-opacity & scale
+ * in Bloom Mode, and supports both click/tap zoom and gesture pinch cycling.
+ */
 export function PhotoGallery3D({
   photos,
+  bloomProgressRef,
   handDataRef,
   focusedPhotoId,
   onSelectPhoto,
@@ -286,16 +329,15 @@ export function PhotoGallery3D({
 }: PhotoGallery3DProps) {
   const { camera } = useThree();
   const containerRef = useRef<THREE.Group | null>(null);
-  const groupRefs = useRef<Map<string, THREE.Group>>(new Map());
+  const handlesMapRef = useRef<Map<string, CardRuntimeHandles>>(new Map());
   const placementCacheRef = useRef<Map<string, { y: number; tiltZ: number; phase: number }>>(
     new Map()
   );
+
   const pinchLatchedRef = useRef(false);
   const lastPinchAtRef = useRef(0);
-  const openHoldSinceRef = useRef<number | null>(null);
   const cycleIndexRef = useRef(0);
 
-  // Reusable math temporaries to avoid per-frame allocations
   const tmpForward = useMemo(() => new THREE.Vector3(), []);
   const tmpTargetWorld = useMemo(() => new THREE.Vector3(), []);
   const tmpTargetLocal = useMemo(() => new THREE.Vector3(), []);
@@ -303,6 +345,8 @@ export function PhotoGallery3D({
   const tmpContainerQuat = useMemo(() => new THREE.Quaternion(), []);
   const tmpLocalQuat = useMemo(() => new THREE.Quaternion(), []);
   const tmpTargetQuat = useMemo(() => new THREE.Quaternion(), []);
+  const tmpWorldPos = useMemo(() => new THREE.Vector3(), []);
+  const tmpEuler = useMemo(() => new THREE.Euler(), []);
 
   const backTexture = useMemo(() => createPolaroidBackTexture(), []);
 
@@ -312,40 +356,54 @@ export function PhotoGallery3D({
 
   const placements = useMemo<PolaroidPlacement[]>(() => {
     const count = Math.max(photos.length, 1);
-    const orbitRadius = 7.6;
+    const quietOrbitRadius = 7.4;
+    const bloomTierRadii = [7.4, 9.8, 12.0];
+    const bloomTierSpeeds = [0.15, -0.1, 0.075];
+    const bloomTierTilts = [0.22, -0.17, 0.12];
 
     return photos.map((photo, index) => {
       let cached = placementCacheRef.current.get(photo.id);
       if (!cached) {
         cached = {
-          y: ((index % 3) - 1) * 2.15 + (Math.random() - 0.5) * 1.1,
-          tiltZ: (Math.random() - 0.5) * 0.16,
+          y: ((index % 3) - 1) * 2.1 + (Math.random() - 0.5) * 0.9,
+          tiltZ: (Math.random() - 0.5) * 0.14,
           phase: Math.random() * Math.PI * 2,
         };
         placementCacheRef.current.set(photo.id, cached);
       }
+
       const angle = (index / count) * Math.PI * 2;
-      const initialPos = new THREE.Vector3(
-        Math.sin(angle) * orbitRadius,
+      const tier = index % 3;
+
+      const quietPos = new THREE.Vector3(
+        Math.sin(angle) * quietOrbitRadius,
         cached.y,
-        Math.cos(angle) * orbitRadius
+        Math.cos(angle) * quietOrbitRadius
       );
-      // Face outward from the tree center
-      const initialRot = new THREE.Euler(0, angle, cached.tiltZ);
+      const quietRot = new THREE.Euler(0, angle, cached.tiltZ);
+
       return {
         photo,
-        initialPos,
-        initialRot,
+        quietPos,
+        quietRot,
+        bloomRadius: bloomTierRadii[tier],
+        bloomAngle0: angle + tier * 0.55,
+        bloomOrbitSpeed: bloomTierSpeeds[tier],
+        bloomY: (tier - 1) * 2.35 + (cached.y * 0.35),
+        bloomTilt: bloomTierTilts[tier],
         tiltZ: cached.tiltZ,
         phase: cached.phase,
       };
     });
   }, [photos]);
 
-  const registerGroup = (id: string, group: THREE.Group | null) => {
-    if (group) groupRefs.current.set(id, group);
-    else groupRefs.current.delete(id);
-  };
+  const registerHandles = useMemo(
+    () => (id: string, handles: CardRuntimeHandles | null) => {
+      if (handles) handlesMapRef.current.set(id, handles);
+      else handlesMapRef.current.delete(id);
+    },
+    []
+  );
 
   const handleToggleFocus = (id: string) => {
     onSelectPhoto(focusedPhotoId === id ? null : id);
@@ -359,15 +417,17 @@ export function PhotoGallery3D({
     const time = state.clock.getElapsedTime();
     const hand = handDataRef.current;
 
-    // Camera gesture PINCH edge detection -> cycle to next Polaroid (with anti-double-trigger cooldown)
+    const p = bloomProgressRef.current;
+    const ease = p * p * (3 - 2 * p);
+
+    // Camera gesture PINCH -> cycle/select next Polaroid with anti-double-trigger cooldown
     if (hand.source === 'camera') {
       const nowMs = performance.now();
       if (hand.gesture === 'PINCH') {
-        openHoldSinceRef.current = null;
         if (
           !pinchLatchedRef.current &&
           placements.length > 0 &&
-          nowMs - lastPinchAtRef.current > 450
+          nowMs - lastPinchAtRef.current > 550
         ) {
           pinchLatchedRef.current = true;
           lastPinchAtRef.current = nowMs;
@@ -377,36 +437,29 @@ export function PhotoGallery3D({
         }
       } else {
         pinchLatchedRef.current = false;
-
-        // Require intentional sustained open palm (not just releasing a pinch!) to dismiss focused photo
-        if (hand.gesture === 'OPEN' && focusedPhotoId !== null) {
-          if (nowMs - lastPinchAtRef.current > 900) {
-            if (openHoldSinceRef.current === null) {
-              openHoldSinceRef.current = nowMs;
-            } else if (nowMs - openHoldSinceRef.current > 420) {
-              openHoldSinceRef.current = null;
-              onSelectPhoto(null);
-            }
-          }
-        } else {
-          openHoldSinceRef.current = null;
+        // Making a fist smoothly dismisses zoomed card while regathering the tree
+        if (hand.gesture === 'FIST' && focusedPhotoId !== null && nowMs - lastPinchAtRef.current > 650) {
+          onSelectPhoto(null);
         }
       }
     }
 
     container.getWorldQuaternion(tmpContainerQuat);
     const invContainerQuat = tmpContainerQuat.clone().invert();
-    const lerpSpeed = Math.min(1, delta * 5.8);
+    const lerpSpeed = Math.min(1, delta * 5.6);
 
     for (let i = 0; i < placements.length; i++) {
-      const p = placements[i];
-      const group = groupRefs.current.get(p.photo.id);
-      if (!group) continue;
+      const pl = placements[i];
+      const handles = handlesMapRef.current.get(pl.photo.id);
+      if (!handles) continue;
 
-      const isFocused = focusedPhotoId === p.photo.id;
+      const { group, bodyMat, frontMat, backMat, clipMat } = handles;
+      const isFocused = focusedPhotoId === pl.photo.id;
+
+      let targetScale = 1;
+      let targetOpacity = 1;
 
       if (isFocused) {
-        // Place smoothly 5.8 units directly in front of camera
         tmpForward.set(0, 0, -5.8).applyQuaternion(camera.quaternion);
         tmpTargetWorld.copy(camera.position).add(tmpForward);
         tmpTargetLocal.copy(tmpTargetWorld);
@@ -418,18 +471,76 @@ export function PhotoGallery3D({
 
         group.position.lerp(tmpTargetLocal, lerpSpeed);
         group.quaternion.slerp(tmpLocalQuat, lerpSpeed);
-        const s = THREE.MathUtils.lerp(group.scale.x, 2.25, lerpSpeed);
-        group.scale.setScalar(s);
+        targetScale = 2.25;
+        targetOpacity = 1;
       } else {
-        tmpTargetLocal.copy(p.initialPos);
-        tmpTargetLocal.y += Math.sin(time * 1.15 + p.phase) * floatAmp;
-        tmpTargetQuat.setFromEuler(p.initialRot);
+        const bob = Math.sin(time * 1.1 + pl.phase) * floatAmp;
+        const qx = pl.quietPos.x;
+        const qy = pl.quietPos.y + bob;
+        const qz = pl.quietPos.z;
+
+        if (ease > 0.001) {
+          // Layered orbital placement in Bloom mode
+          const ang = pl.bloomAngle0 + time * pl.bloomOrbitSpeed;
+          const rx = Math.sin(ang) * pl.bloomRadius;
+          const rz = Math.cos(ang) * pl.bloomRadius;
+          const ry = pl.bloomY + bob * 1.35;
+
+          const sinT = Math.sin(pl.bloomTilt);
+          const cosT = Math.cos(pl.bloomTilt);
+          const ox = rx;
+          const oy = ry * cosT - rz * sinT;
+          const oz = ry * sinT + rz * cosT;
+
+          tmpTargetLocal.set(
+            qx + (ox - qx) * ease,
+            qy + (oy - qy) * ease,
+            qz + (oz - qz) * ease
+          );
+          // Gently face outward along current blended orbital angle
+          const blendedAngle = Math.atan2(tmpTargetLocal.x, tmpTargetLocal.z);
+          tmpEuler.set(0, blendedAngle, pl.tiltZ);
+          tmpTargetQuat.setFromEuler(tmpEuler);
+        } else {
+          tmpTargetLocal.set(qx, qy, qz);
+          tmpTargetQuat.setFromEuler(pl.quietRot);
+        }
 
         group.position.lerp(tmpTargetLocal, lerpSpeed);
         group.quaternion.slerp(tmpTargetQuat, lerpSpeed);
-        const s = THREE.MathUtils.lerp(group.scale.x, 1, lerpSpeed);
-        group.scale.setScalar(s);
+
+        // Atmospheric depth perception: cards farther behind subtly recede in scale & opacity
+        group.getWorldPosition(tmpWorldPos);
+        const dist = tmpWorldPos.distanceTo(camera.position);
+        const depthT = THREE.MathUtils.clamp((dist - 12) / 22, 0, 1);
+        const depthScale = THREE.MathUtils.lerp(1.06, 0.78, depthT);
+        const depthOpacity = THREE.MathUtils.lerp(1.0, 0.46, depthT);
+
+        // Keep Quiet mode mostly solid; accentuate layered depth gracefully in Bloom mode
+        targetScale = THREE.MathUtils.lerp(1, depthScale, ease * 0.85);
+        targetOpacity = THREE.MathUtils.lerp(
+          THREE.MathUtils.lerp(1, 0.78, depthT),
+          depthOpacity,
+          ease
+        );
+
+        // Dim non-focused cards slightly when another photo is zoomed in
+        if (focusedPhotoId !== null) {
+          targetOpacity *= 0.45;
+        }
       }
+
+      const nextScale = THREE.MathUtils.lerp(group.scale.x, targetScale, lerpSpeed);
+      group.scale.setScalar(nextScale);
+
+      const applyOpacity = (mat: THREE.MeshStandardMaterial | null) => {
+        if (!mat) return;
+        mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, lerpSpeed);
+      };
+      applyOpacity(bodyMat);
+      applyOpacity(frontMat);
+      applyOpacity(backMat);
+      applyOpacity(clipMat);
     }
   });
 
@@ -444,7 +555,7 @@ export function PhotoGallery3D({
           polaroidStyle={polaroidStyle}
           isFocused={focusedPhotoId === placement.photo.id}
           onToggleFocus={handleToggleFocus}
-          registerGroup={registerGroup}
+          registerHandles={registerHandles}
         />
       ))}
     </group>

@@ -2,14 +2,12 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { AudioMetrics, HandData, OrnamentStyle, TreeMode } from '../../types';
+import type { AudioMetrics, OrnamentStyle } from '../../types';
 import { TREE_HEIGHT, TREE_RADIUS } from './constants';
 
 interface OrnamentsProps {
-  mode: TreeMode;
+  bloomProgressRef: MutableRefObject<number>;
   audioMetricsRef: MutableRefObject<AudioMetrics>;
-  handDataRef: MutableRefObject<HandData>;
-  bloomActiveRef: MutableRefObject<boolean>;
   boxCount: number;
   bellCount: number;
   boxColor1: string;
@@ -25,38 +23,41 @@ interface OrnamentsProps {
 
 interface OrnamentItem {
   treePos: THREE.Vector3;
-  randomPos: THREE.Vector3;
-  explosionDir: THREE.Vector3;
-  currentPos: THREE.Vector3;
+  orbitRadius: number;
+  orbitAngle0: number;
+  orbitSpeed: number;
+  orbitY: number;
+  orbitTilt: number;
+  swirlSign: number;
   baseScale: number;
   rotation: THREE.Euler;
   variant: 1 | 2;
 }
 
-function generateItems(count: number, minScale: number, scaleRange: number): OrnamentItem[] {
-  return Array.from({ length: count }, () => {
+function generateItems(
+  count: number,
+  minScale: number,
+  scaleRange: number,
+  orbitMinR: number,
+  orbitSpanR: number
+): OrnamentItem[] {
+  return Array.from({ length: count }, (_, idx) => {
     const hNorm = Math.pow(Math.random(), 1.25);
     const y = hNorm * (TREE_HEIGHT * 0.92) - TREE_HEIGHT / 2 + 0.35;
-    const radius = (1 - hNorm) * TREE_RADIUS * (0.62 + Math.random() * 0.48);
+    const radius = (1 - hNorm) * TREE_RADIUS * (0.62 + Math.random() * 0.45);
     const angle = Math.random() * Math.PI * 2;
 
     const treePos = new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
-    const randomPos = new THREE.Vector3(
-      (Math.random() - 0.5) * 24,
-      (Math.random() - 0.5) * 18,
-      (Math.random() - 0.5) * 20
-    );
-    const explosionDir = new THREE.Vector3(
-      treePos.x + (Math.random() - 0.5) * 2,
-      (Math.random() - 0.4) * 3,
-      treePos.z + (Math.random() - 0.5) * 2
-    ).normalize();
+    const layer = idx % 2;
 
     return {
       treePos,
-      randomPos,
-      explosionDir,
-      currentPos: treePos.clone().multiplyScalar(1.35),
+      orbitRadius: orbitMinR + Math.random() * orbitSpanR,
+      orbitAngle0: angle + (Math.random() - 0.5) * 0.6,
+      orbitSpeed: layer === 0 ? 0.16 : -0.11,
+      orbitY: (hNorm - 0.5) * 5.2 + (Math.random() - 0.5) * 0.9,
+      orbitTilt: layer === 0 ? 0.2 : -0.16,
+      swirlSign: layer === 0 ? 1 : -1,
       baseScale: minScale + Math.random() * scaleRange,
       rotation: new THREE.Euler(
         Math.random() * Math.PI,
@@ -69,10 +70,8 @@ function generateItems(count: number, minScale: number, scaleRange: number): Orn
 }
 
 export function Ornaments({
-  mode,
+  bloomProgressRef,
   audioMetricsRef,
-  handDataRef,
-  bloomActiveRef,
   boxCount,
   bellCount,
   boxColor1,
@@ -115,8 +114,8 @@ export function Ornaments({
   }, [boxColor1, boxColor2, ribbonColor, bellColor, ornamentStyle, boxCount, bellCount]);
 
   // Refined, jewel-sized gifts and baubles that preserve the tree silhouette
-  const boxes = useMemo(() => generateItems(boxCount, 0.17, 0.14), [boxCount]);
-  const bells = useMemo(() => generateItems(bellCount, 0.14, 0.12), [bellCount]);
+  const boxes = useMemo(() => generateItems(boxCount, 0.17, 0.14, 6.2, 5.4), [boxCount]);
+  const bells = useMemo(() => generateItems(bellCount, 0.14, 0.12, 5.4, 7.6), [bellCount]);
 
   const isCrystal = ornamentStyle === 'crystal';
   const isVintage = ornamentStyle === 'vintage';
@@ -125,10 +124,10 @@ export function Ornaments({
     const delta = Math.min(rawDelta, 0.05);
     const time = state.clock.getElapsedTime();
     const audioLevel = audioMetricsRef.current.level;
-    const isBlooming =
-      handDataRef.current.gesture === 'OPEN' || bloomActiveRef.current;
-    const explosionDist = 9.8;
-    const lerpRate = Math.min(1, (isBlooming ? 4.0 : 2.1) * delta);
+
+    const p = bloomProgressRef.current;
+    const ease = p * p * (3 - 2 * p);
+    const transitArc = Math.sin(ease * Math.PI);
 
     // Smoothly crossfade instance colors until settled
     if (!colorSettledRef.current) {
@@ -177,32 +176,48 @@ export function Ornaments({
       }
     }
 
+    const computeOrbitalPos = (item: OrnamentItem) => {
+      if (ease <= 0.0005) {
+        return { x: item.treePos.x, y: item.treePos.y, z: item.treePos.z };
+      }
+      const ang = item.orbitAngle0 + time * item.orbitSpeed;
+      const rawX = Math.cos(ang) * item.orbitRadius;
+      const rawZ = Math.sin(ang) * item.orbitRadius;
+      const rawY = item.orbitY + Math.sin(time * 0.7 + item.orbitAngle0) * 0.24;
+
+      const sinT = Math.sin(item.orbitTilt);
+      const cosT = Math.cos(item.orbitTilt);
+      const ox = rawX;
+      const oy = rawY * cosT - rawZ * sinT;
+      const oz = rawY * sinT + rawZ * cosT;
+
+      const bx = item.treePos.x + (ox - item.treePos.x) * ease;
+      const by = item.treePos.y + (oy - item.treePos.y) * ease;
+      const bz = item.treePos.z + (oz - item.treePos.z) * ease;
+
+      const swirl = transitArc * 0.85 * item.swirlSign;
+      const cs = Math.cos(swirl);
+      const sn = Math.sin(swirl);
+      return {
+        x: bx * cs - bz * sn,
+        y: by,
+        z: bx * sn + bz * cs,
+      };
+    };
+
     if (boxCount > 0 && boxMeshRef.current) {
+      const spin = isCrystal ? 0.32 : isVintage ? 0.14 : 0.2;
       for (let i = 0; i < boxes.length; i++) {
         const item = boxes[i];
-        let tx = mode === 'TREE' ? item.treePos.x : item.randomPos.x;
-        let ty = mode === 'TREE' ? item.treePos.y : item.randomPos.y;
-        let tz = mode === 'TREE' ? item.treePos.z : item.randomPos.z;
+        const pos = computeOrbitalPos(item);
 
-        if (isBlooming) {
-          const amp = 1 + audioLevel * 0.5;
-          tx += item.explosionDir.x * explosionDist * amp;
-          ty += item.explosionDir.y * explosionDist * amp;
-          tz += item.explosionDir.z * explosionDist * amp;
-        }
-
-        item.currentPos.x += (tx - item.currentPos.x) * lerpRate;
-        item.currentPos.y += (ty - item.currentPos.y) * lerpRate;
-        item.currentPos.z += (tz - item.currentPos.z) * lerpRate;
-
-        dummy.position.copy(item.currentPos);
-        const spin = isCrystal ? 0.32 : isVintage ? 0.14 : 0.2;
+        dummy.position.set(pos.x, pos.y, pos.z);
         dummy.rotation.set(
           item.rotation.x + time * spin * 0.75,
           item.rotation.y + time * spin,
           item.rotation.z
         );
-        const s = item.baseScale * (isCrystal ? 1.15 : 1) * (1 + audioLevel * 0.35);
+        const s = item.baseScale * (isCrystal ? 1.15 : 1) * (1 + audioLevel * 0.32);
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
 
@@ -219,24 +234,11 @@ export function Ornaments({
     if (bellCount > 0 && bellMeshRef.current) {
       for (let i = 0; i < bells.length; i++) {
         const item = bells[i];
-        let tx = mode === 'TREE' ? item.treePos.x : item.randomPos.x;
-        let ty = mode === 'TREE' ? item.treePos.y : item.randomPos.y;
-        let tz = mode === 'TREE' ? item.treePos.z : item.randomPos.z;
+        const pos = computeOrbitalPos(item);
 
-        if (isBlooming) {
-          const amp = 1 + audioLevel * 0.5;
-          tx += item.explosionDir.x * explosionDist * amp;
-          ty += item.explosionDir.y * explosionDist * amp;
-          tz += item.explosionDir.z * explosionDist * amp;
-        }
-
-        item.currentPos.x += (tx - item.currentPos.x) * lerpRate;
-        item.currentPos.y += (ty - item.currentPos.y) * lerpRate;
-        item.currentPos.z += (tz - item.currentPos.z) * lerpRate;
-
-        dummy.position.copy(item.currentPos);
-        dummy.rotation.set(item.rotation.x, item.rotation.y + time * 0.4, item.rotation.z);
-        const s = item.baseScale * (1 + audioLevel * 0.38);
+        dummy.position.set(pos.x, pos.y, pos.z);
+        dummy.rotation.set(item.rotation.x, item.rotation.y + time * 0.38, item.rotation.z);
+        const s = item.baseScale * (1 + audioLevel * 0.34);
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
 
@@ -250,7 +252,6 @@ export function Ornaments({
     <group>
       {boxCount > 0 && (
         <>
-          {/* Crystal faceted keepsakes in Memory Galaxy; refined gift boxes in Midnight & Vintage */}
           <instancedMesh
             key={`gift-body-${ornamentStyle}-${boxCount}`}
             ref={boxMeshRef}
@@ -273,7 +274,6 @@ export function Ornaments({
             />
           </instancedMesh>
 
-          {/* Cross ribbons for classic/vintage gifts; thin luminous orbital ring for crystal gifts */}
           {isCrystal ? (
             <instancedMesh
               key={`gift-crystal-ring-${boxCount}`}
