@@ -40,17 +40,168 @@
   font-family: 'Caveat', 'Noto Serif SC', cursive;
 }
 
+/* Editorial slim scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+  width: 3px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
+  background: transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(216, 183, 123, 0.3);
+  background: rgba(232, 220, 196, 0.22);
   border-radius: 999px;
+}
+
+/* Editorial navigation hairline underline */
+.editorial-link {
+  position: relative;
+}
+
+.editorial-link::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 1px;
+  background-color: var(--editorial-accent, #d8b77b);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease;
+}
+
+.editorial-link:hover::after,
+.editorial-link[data-active='true']::after {
+  transform: scaleX(1);
+  opacity: 0.9;
+}
+
+/* Fine-line magazine range slider */
+.editorial-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.editorial-range:focus {
+  outline: none;
+}
+
+.editorial-range::-webkit-slider-runnable-track {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    var(--range-accent, #d8b77b) 0%,
+    var(--range-accent, #d8b77b) var(--range-pct, 50%),
+    rgba(255, 255, 255, 0.16) var(--range-pct, 50%),
+    rgba(255, 255, 255, 0.16) 100%
+  );
+}
+
+.editorial-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: var(--range-thumb-bg, #09131c);
+  border: 1.25px solid var(--range-accent, #d8b77b);
+  transition: transform 200ms ease, background-color 200ms ease;
+}
+
+.editorial-range:hover::-webkit-slider-thumb {
+  transform: scale(1.18);
+  background: var(--range-accent, #d8b77b);
+}
+
+.editorial-range::-moz-range-track {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.editorial-range::-moz-range-progress {
+  height: 1px;
+  background: var(--range-accent, #d8b77b);
+}
+
+.editorial-range::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--range-thumb-bg, #09131c);
+  border: 1.25px solid var(--range-accent, #d8b77b);
+  transition: transform 200ms ease, background-color 200ms ease;
+}
+
+/* Quiet editorial panel & mobile sheet entrances (180-320ms, zero bounce) */
+@keyframes editorial-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-editorial-panel {
+  animation: editorial-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes editorial-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-editorial-sheet {
+  animation: editorial-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Subtle 3-bar hairline sound equalizer for 02 / SOUND */
+@keyframes eq-pulse-a {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+@keyframes eq-pulse-b {
+  0%, 100% { transform: scaleY(0.85); }
+  45% { transform: scaleY(0.3); }
+}
+
+@keyframes eq-pulse-c {
+  0%, 100% { transform: scaleY(0.45); }
+  60% { transform: scaleY(0.95); }
+}
+
+.eq-bar-1 {
+  transform-origin: bottom;
+  animation: eq-pulse-a 1.1s ease-in-out infinite;
+}
+
+.eq-bar-2 {
+  transform-origin: bottom;
+  animation: eq-pulse-b 0.9s ease-in-out infinite;
+}
+
+.eq-bar-3 {
+  transform-origin: bottom;
+  animation: eq-pulse-c 1.25s ease-in-out infinite;
 }
 
 @keyframes shimmer {
@@ -77,5 +228,5 @@
 }
 
 .animate-spin-slow {
-  animation: spin-slow 10s linear infinite;
+  animation: spin-slow 12s linear infinite;
 }
