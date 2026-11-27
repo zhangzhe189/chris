@@ -396,7 +396,7 @@ export function HandTracker({ onHandUpdate, accentColor }: HandTrackerProps) {
   }, []);
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
+    <div className="fixed bottom-20 sm:bottom-6 right-4 sm:right-6 z-40 flex flex-col items-end gap-2">
       <div
         className={`relative overflow-hidden rounded-xl border transition-all duration-300 origin-bottom-right shadow-2xl ${
           previewExpanded ? 'w-52 h-40 opacity-100' : 'w-0 h-0 opacity-0 pointer-events-none'

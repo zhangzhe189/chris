@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
 import {
-  Camera,
+  AudioLines,
   ChevronLeft,
   ChevronRight,
   Hand,
@@ -9,12 +9,12 @@ import {
   Music,
   Plus,
   RotateCcw,
-  Settings,
+  SlidersHorizontal,
   Sparkles,
-  Timer,
   Trash2,
   Upload,
   Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import { THEME_PRESETS } from '../config/themes';
@@ -64,6 +64,8 @@ interface HudOverlayProps {
   config: SceneConfig;
   onConfigPatch: (patch: Partial<SceneConfig>) => void;
   onSelectTheme: (themeId: ThemeId) => void;
+  isBloomActive: boolean;
+  onToggleBloom: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
   audioName: string;
@@ -92,6 +94,8 @@ export function HudOverlay({
   config,
   onConfigPatch,
   onSelectTheme,
+  isBloomActive,
+  onToggleBloom,
   isPlaying,
   onTogglePlay,
   audioName,
@@ -133,293 +137,121 @@ export function HudOverlay({
     onSelectPhoto(photos[nextIdx].id);
   };
 
+  const gestureButtonText = !handTrackingEnabled
+    ? 'AI 手势'
+    : gesture === 'OPEN'
+      ? '手势 · 绽放'
+      : gesture === 'PINCH'
+        ? '手势 · 切图'
+        : isHandPresent
+          ? '手势 · 聚拢'
+          : '手势已开';
+
+  const isBloomedVisual = isBloomActive || (handTrackingEnabled && gesture === 'OPEN');
+
   return (
     <div className="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between p-4 sm:p-6 md:p-8">
-      {/* Top Row */}
-      <div className="flex justify-between items-start gap-4">
-        {/* Top-Left: Title, Countdown, Photo Album */}
-        <div className="flex flex-col items-start gap-3.5 pointer-events-auto max-w-[62vw] sm:max-w-none">
-          <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <Sparkles size={16} style={{ color: accent }} className="animate-shimmer shrink-0" />
-              <span
-                className="text-[10px] sm:text-[11px] tracking-[0.36em] font-semibold"
-                style={{ color: `${accent}cc` }}
-              >
-                CHRISTMAS EVE IS COMING
-              </span>
-            </div>
-            <h1 className="font-display italic text-3xl sm:text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-200 to-rose-200 tracking-tight drop-shadow-lg leading-tight">
-              Merry Christmas
-            </h1>
-            <p className="text-xs sm:text-sm mt-1.5 tracking-[0.28em] text-white/60">
-              璀璨圣诞树 · 点亮冬日心愿
-            </p>
+      {/* Top Bar: Compact Brand + Slim Countdown (Left) | Two Minimal Circular Icons (Right) */}
+      <header className="flex justify-between items-start gap-4">
+        <div className="flex flex-col items-start pointer-events-auto">
+          <h1
+            className="font-display italic text-2xl sm:text-3xl md:text-[34px] font-semibold tracking-tight leading-none drop-shadow-[0_2px_16px_rgba(255,217,138,0.28)]"
+            style={{ color: accent }}
+          >
+            Merry Christmas
+          </h1>
 
-            {/* Countdown */}
-            <div className="flex items-center gap-2 mt-3.5 flex-wrap">
-              <Timer size={13} style={{ color: accent }} className="shrink-0" />
-              <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold">
-                {[
-                  { val: String(countdown.days), unit: '天' },
-                  { val: String(countdown.hours).padStart(2, '0'), unit: '时' },
-                  { val: String(countdown.minutes).padStart(2, '0'), unit: '分' },
-                  { val: String(countdown.seconds).padStart(2, '0'), unit: '秒' },
-                ].map((item) => (
-                  <span
-                    key={item.unit}
-                    className="px-2 py-1 rounded-md border backdrop-blur-md"
-                    style={{
-                      borderColor: `${accent}48`,
-                      background: `${accent}14`,
-                      color: accent,
-                    }}
-                  >
-                    {item.val} {item.unit}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Photo Album Button & Popover */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setAlbumOpen((v) => !v)}
-              className="flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs tracking-wider transition-all duration-300 backdrop-blur-md cursor-pointer"
-              style={
-                albumOpen
-                  ? {
-                      background: `${accent}24`,
-                      borderColor: `${accent}99`,
-                      color: accent,
-                      boxShadow: `0 0 18px ${accent}38`,
-                    }
-                  : {
-                      background: 'rgba(10, 14, 30, 0.55)',
-                      borderColor: 'rgba(255, 255, 255, 0.16)',
-                      color: 'rgba(255, 255, 255, 0.78)',
-                    }
-              }
-            >
-              <ImageIcon size={14} />
-              <span>回忆相册</span>
-              <span className="text-[10px] opacity-65">({photos.length})</span>
-            </button>
-
-            {albumOpen && (
-              <div
-                className="absolute top-11 left-0 w-72 sm:w-80 rounded-2xl p-4 backdrop-blur-xl z-50 shadow-2xl"
-                style={{
-                  background: 'rgba(10, 14, 30, 0.92)',
-                  border: `1px solid ${accent}40`,
-                }}
-              >
-                <div className="flex justify-between items-center mb-3 pb-2 border-b border-white/10">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs tracking-widest font-semibold" style={{ color: accent }}>
-                      拍立得回忆相册
-                    </h3>
-                    <span className="text-[10px] text-white/45">{photos.length} 张</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setAlbumOpen(false)}
-                    className="text-white/45 hover:text-white cursor-pointer"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto custom-scrollbar mb-3 pr-0.5">
-                  <input
-                    ref={imageInputRef}
-                    type="file"
-                    multiple
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={onPhotoUpload}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => imageInputRef.current?.click()}
-                    className="aspect-square flex flex-col items-center justify-center gap-1 border border-dashed rounded-lg transition-colors hover:border-white/50 hover:text-white/80 cursor-pointer"
-                    style={{
-                      borderColor: 'rgba(255, 255, 255, 0.24)',
-                      color: 'rgba(255, 255, 255, 0.5)',
-                    }}
-                    title="上传本地照片"
-                  >
-                    <Plus size={16} />
-                    <span className="text-[9px]">添加</span>
-                  </button>
-
-                  {photos.map((photo) => {
-                    const active = focusedPhotoId === photo.id;
-                    return (
-                      <div
-                        key={photo.id}
-                        className="relative group aspect-square rounded-lg overflow-hidden border transition-all cursor-pointer"
-                        style={{
-                          borderColor: active ? accent : 'rgba(255, 255, 255, 0.14)',
-                          boxShadow: active ? `0 0 12px ${accent}55` : undefined,
-                        }}
-                        onClick={() => onSelectPhoto(active ? null : photo.id)}
-                        title={`点击预览：${photo.caption}`}
-                      >
-                        <img
-                          src={photo.url}
-                          alt={photo.caption}
-                          className="w-full h-full object-cover opacity-85 group-hover:opacity-100 transition-opacity"
-                        />
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemovePhoto(photo);
-                          }}
-                          className="absolute top-1 right-1 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                          style={{ background: 'rgba(0, 0, 0, 0.72)', color: '#ff858d' }}
-                          title="删除此照片"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {hasRemovedDefaults && (
-                  <button
-                    type="button"
-                    onClick={onRestoreDefaultPhotos}
-                    className="w-full mb-2 py-1.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 border border-white/10 text-white/65 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                  >
-                    <RotateCcw size={11} />
-                    恢复内置圣诞明信片
-                  </button>
-                )}
-
-                <p className="text-[10px] leading-relaxed text-center text-white/40">
-                  支持 JPG / PNG / WebP，照片仅存在本机浏览器；点击缩略图可 3D 放大预览
-                </p>
-              </div>
-            )}
+          {/* Single slim frosted countdown pill */}
+          <div
+            className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border backdrop-blur-md text-[11px] sm:text-xs font-medium tracking-wider tabular-nums"
+            style={{
+              background: 'rgba(10, 14, 30, 0.48)',
+              borderColor: `${accent}38`,
+              color: `${accent}e6`,
+            }}
+          >
+            <span>{countdown.days}天</span>
+            <span className="opacity-40">·</span>
+            <span>{String(countdown.hours).padStart(2, '0')}时</span>
+            <span className="opacity-40">·</span>
+            <span>{String(countdown.minutes).padStart(2, '0')}分</span>
+            <span className="opacity-40">·</span>
+            <span>{String(countdown.seconds).padStart(2, '0')}秒</span>
           </div>
         </div>
 
-        {/* Top-Right: Mode Status, Controls, Gesture Tips */}
-        <div className="flex flex-col items-end gap-2 pointer-events-auto shrink-0">
-          <div
-            className="backdrop-blur-md border px-3 py-1.5 rounded-xl flex items-center gap-3 text-xs"
-            style={{
-              background: 'rgba(10, 14, 30, 0.65)',
-              borderColor: `${accent}40`,
-              color: accent,
+        {/* Top-Right: Only two circular glass buttons (Music & Settings) */}
+        <div className="flex items-center gap-2.5 pointer-events-auto shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              if (autoplayBlocked && isPlaying) {
+                onUnlockAudio();
+              } else {
+                onTogglePlay();
+              }
             }}
+            className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full border backdrop-blur-md flex items-center justify-center transition-all duration-300 hover:scale-105 cursor-pointer"
+            style={
+              isPlaying && !autoplayBlocked
+                ? {
+                    background: `${accent}20`,
+                    borderColor: `${accent}70`,
+                    color: accent,
+                    boxShadow: `0 0 18px ${accent}25`,
+                  }
+                : {
+                    background: 'rgba(10, 14, 30, 0.55)',
+                    borderColor: 'rgba(255, 255, 255, 0.18)',
+                    color: 'rgba(255, 255, 255, 0.65)',
+                  }
+            }
+            title={isPlaying ? '暂停圣诞音乐' : '播放圣诞音乐'}
+            aria-label={isPlaying ? '暂停圣诞音乐' : '播放圣诞音乐'}
           >
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-              <span>{mode === 'TREE' ? '圣诞树模式' : '星光漂浮模式'}</span>
-            </div>
-            {handTrackingEnabled && (
-              <>
-                <div className="w-px h-3" style={{ background: `${accent}48` }} />
-                <div className="flex items-center gap-1.5">
-                  <Hand
-                    size={13}
-                    style={{
-                      color:
-                        gesture === 'OPEN' || gesture === 'PINCH' ? '#ff6b78' : accent,
-                    }}
-                  />
-                  <span
-                    style={{
-                      color:
-                        gesture === 'OPEN' || gesture === 'PINCH' ? '#ff6b78' : accent,
-                    }}
-                  >
-                    {gesture === 'OPEN'
-                      ? '绽放'
-                      : gesture === 'PINCH'
-                        ? '捏合看图'
-                        : isHandPresent
-                          ? '聚拢'
-                          : '待识别'}
-                  </span>
-                </div>
-              </>
+            {isPlaying && !autoplayBlocked ? (
+              <AudioLines size={17} className="animate-pulse" />
+            ) : (
+              <VolumeX size={17} />
             )}
-          </div>
+          </button>
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onToggleHandTracking}
-              className="p-2.5 rounded-xl border backdrop-blur-md transition-all cursor-pointer"
-              style={
-                handTrackingEnabled
-                  ? {
-                      background: `${accent}26`,
-                      borderColor: `${accent}99`,
-                      color: accent,
-                    }
-                  : {
-                      background: 'rgba(10, 14, 30, 0.65)',
-                      borderColor: 'rgba(255, 255, 255, 0.16)',
-                      color: 'rgba(255, 255, 255, 0.65)',
-                    }
-              }
-              title="开启/关闭摄像头手势控制"
-            >
-              <Camera size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setSettingsOpen((v) => !v)}
-              className="p-2.5 rounded-xl border backdrop-blur-md transition-all cursor-pointer"
-              style={
-                settingsOpen
-                  ? {
-                      background: `${accent}26`,
-                      borderColor: `${accent}99`,
-                      color: accent,
-                    }
-                  : {
-                      background: 'rgba(10, 14, 30, 0.65)',
-                      borderColor: 'rgba(255, 255, 255, 0.16)',
-                      color: 'rgba(255, 255, 255, 0.65)',
-                    }
-              }
-              title="圣诞布置与主题设置"
-            >
-              <Settings size={16} />
-            </button>
-          </div>
-
-          <div
-            className="hidden sm:block rounded-xl px-3 py-2 text-[10px] leading-relaxed text-right backdrop-blur-md"
-            style={{
-              background: 'rgba(10, 14, 30, 0.72)',
-              border: `1px solid ${accent}28`,
-              color: 'rgba(255, 236, 200, 0.82)',
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsOpen((v) => !v);
+              if (!settingsOpen) setAlbumOpen(false);
             }}
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full border backdrop-blur-md flex items-center justify-center transition-all duration-300 hover:scale-105 cursor-pointer"
+            style={
+              settingsOpen
+                ? {
+                    background: `${accent}24`,
+                    borderColor: `${accent}88`,
+                    color: accent,
+                    boxShadow: `0 0 18px ${accent}2a`,
+                  }
+                : {
+                    background: 'rgba(10, 14, 30, 0.55)',
+                    borderColor: 'rgba(255, 255, 255, 0.18)',
+                    color: 'rgba(255, 255, 255, 0.72)',
+                  }
+            }
+            title="主题与圣诞布置"
+            aria-label="主题与圣诞布置"
           >
-            <div>点相机按钮开启 AI 手势</div>
-            <div>张开手掌：星光圣诞树绽放</div>
-            <div>捏合手指 / 点击相框：查看拍立得</div>
-          </div>
+            <SlidersHorizontal size={17} />
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* Right Settings Drawer */}
+      {/* Right Settings Slide-Over Panel */}
       {settingsOpen && (
         <aside
-          className="fixed top-24 right-4 sm:right-6 w-80 max-w-[calc(100vw-2rem)] rounded-2xl p-5 pointer-events-auto backdrop-blur-xl z-40 overflow-y-auto max-h-[72vh] custom-scrollbar shadow-2xl"
+          className="fixed top-20 right-4 sm:right-8 w-80 max-w-[calc(100vw-2rem)] rounded-2xl p-5 pointer-events-auto backdrop-blur-2xl z-40 overflow-y-auto max-h-[70vh] custom-scrollbar shadow-2xl"
           style={{
-            background: 'rgba(10, 14, 30, 0.92)',
-            border: `1px solid ${accent}48`,
+            background: 'rgba(9, 13, 28, 0.88)',
+            border: `1px solid ${accent}40`,
           }}
         >
           <div className="flex justify-between items-center mb-4">
@@ -494,12 +326,12 @@ export function HudOverlay({
               <button
                 type="button"
                 onClick={onTogglePlay}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs border transition-all cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs border transition-all cursor-pointer"
                 style={
                   isPlaying
                     ? {
                         background: 'rgba(255, 89, 100, 0.16)',
-                        borderColor: 'rgba(255, 89, 100, 0.6)',
+                        borderColor: 'rgba(255, 89, 100, 0.55)',
                         color: '#ff9099',
                       }
                     : {
@@ -525,7 +357,6 @@ export function HudOverlay({
                       type="button"
                       onClick={onResetAudio}
                       className="text-[10px] text-white/45 hover:text-white shrink-0 cursor-pointer"
-                      title="切回内置圣诞八音盒"
                     >
                       恢复默认
                     </button>
@@ -683,11 +514,119 @@ export function HudOverlay({
                 ))}
               </div>
             </section>
+
+            {/* Concise interaction cheat sheet tucked cleanly inside settings */}
+            <section className="rounded-xl p-3 border border-white/10 bg-white/[0.03] text-[11px] leading-relaxed text-white/55 space-y-1">
+              <div className="font-semibold text-white/75 mb-1">交互提示</div>
+              <div>· 拖动旋转视角，双指/滚轮缩放</div>
+              <div>· 点击 3D 拍立得放大查看</div>
+              <div>· 手势：张掌绽放 / 握拳聚拢 / 捏合切图</div>
+            </section>
           </div>
         </aside>
       )}
 
-      {/* Hand Tracking Reticle (positioned directly via ref for 60fps zero-rerender motion) */}
+      {/* Centered Album Popover anchored cleanly above bottom pills */}
+      {albumOpen && (
+        <div
+          className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-sm rounded-2xl p-4 pointer-events-auto backdrop-blur-2xl z-40 shadow-2xl"
+          style={{
+            background: 'rgba(9, 13, 28, 0.92)',
+            border: `1px solid ${accent}42`,
+          }}
+        >
+          <div className="flex justify-between items-center mb-3 pb-2 border-b border-white/10">
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs tracking-widest font-semibold" style={{ color: accent }}>
+                拍立得回忆相册
+              </h3>
+              <span className="text-[10px] text-white/45">{photos.length} 张</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAlbumOpen(false)}
+              className="text-white/45 hover:text-white cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-4 gap-2 max-h-56 overflow-y-auto custom-scrollbar mb-3 pr-0.5">
+            <input
+              ref={imageInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp"
+              onChange={onPhotoUpload}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              className="aspect-square flex flex-col items-center justify-center gap-1 border border-dashed rounded-lg transition-colors hover:border-white/50 hover:text-white/80 cursor-pointer"
+              style={{
+                borderColor: 'rgba(255, 255, 255, 0.24)',
+                color: 'rgba(255, 255, 255, 0.55)',
+              }}
+              title="上传本地照片"
+            >
+              <Plus size={16} />
+              <span className="text-[9px]">添加</span>
+            </button>
+
+            {photos.map((photo) => {
+              const active = focusedPhotoId === photo.id;
+              return (
+                <div
+                  key={photo.id}
+                  className="relative group aspect-square rounded-lg overflow-hidden border transition-all cursor-pointer"
+                  style={{
+                    borderColor: active ? accent : 'rgba(255, 255, 255, 0.14)',
+                    boxShadow: active ? `0 0 12px ${accent}55` : undefined,
+                  }}
+                  onClick={() => onSelectPhoto(active ? null : photo.id)}
+                  title={`点击预览：${photo.caption}`}
+                >
+                  <img
+                    src={photo.url}
+                    alt={photo.caption}
+                    className="w-full h-full object-cover opacity-85 group-hover:opacity-100 transition-opacity"
+                  />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemovePhoto(photo);
+                    }}
+                    className="absolute top-1 right-1 p-1 rounded-md opacity-85 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer"
+                    style={{ background: 'rgba(0, 0, 0, 0.72)', color: '#ff858d' }}
+                    title="删除此照片"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {hasRemovedDefaults && (
+            <button
+              type="button"
+              onClick={onRestoreDefaultPhotos}
+              className="w-full mb-2 py-1.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 border border-white/10 text-white/65 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <RotateCcw size={11} />
+              恢复内置圣诞明信片
+            </button>
+          )}
+
+          <p className="text-[10px] leading-relaxed text-center text-white/40">
+            支持 JPG / PNG / WebP，仅保存在本机浏览器；点击缩略图或 3D 相框放大查看
+          </p>
+        </div>
+      )}
+
+      {/* Hand Tracking Reticle (positioned directly via ref for zero-rerender 60fps glide) */}
       <div
         ref={cursorRef}
         className="fixed pointer-events-none z-30 -translate-x-1/2 -translate-y-1/2 transition-opacity duration-150"
@@ -718,27 +657,27 @@ export function HudOverlay({
         </div>
       </div>
 
-      {/* Bottom Area: Audio Unlock Banner, Focused Polaroid Controls, Bottom Guide */}
-      <div className="flex flex-col items-center gap-2.5 w-full">
+      {/* Bottom Area: Floating Trio of Minimalist Champagne-Gold Pills */}
+      <footer className="flex flex-col items-center gap-3 w-full pb-1 sm:pb-2">
         {autoplayBlocked && isPlaying && (
           <button
             type="button"
             onClick={onUnlockAudio}
-            className="pointer-events-auto px-4 py-1.5 rounded-full border backdrop-blur-md text-xs flex items-center gap-2 transition-all hover:scale-105 cursor-pointer shadow-lg"
+            className="pointer-events-auto px-3.5 py-1.5 rounded-full border backdrop-blur-md text-[11px] flex items-center gap-1.5 transition-all hover:scale-105 cursor-pointer shadow-lg"
             style={{
-              background: 'rgba(14, 20, 42, 0.85)',
-              borderColor: `${accent}70`,
+              background: 'rgba(10, 14, 30, 0.78)',
+              borderColor: `${accent}60`,
               color: accent,
             }}
           >
-            <Volume2 size={13} />
-            <span>浏览器拦截了自动播放 · 点击此处开启圣诞音乐</span>
+            <Volume2 size={12} />
+            <span>点击开启圣诞音乐</span>
           </button>
         )}
 
         {focusedPhoto && (
           <div
-            className="pointer-events-auto flex items-center gap-2.5 px-3.5 py-2 rounded-full border backdrop-blur-xl shadow-2xl"
+            className="pointer-events-auto flex items-center gap-2.5 px-3.5 py-1.5 rounded-full border backdrop-blur-xl shadow-2xl"
             style={{
               background: 'rgba(10, 14, 30, 0.82)',
               borderColor: `${accent}55`,
@@ -750,15 +689,15 @@ export function HudOverlay({
               className="p-1 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors cursor-pointer"
               title="上一张"
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={15} />
             </button>
             <span
-              className="font-handwriting text-base px-1 max-w-[180px] truncate"
+              className="font-handwriting text-base px-1 max-w-[160px] truncate"
               style={{ color: accent }}
             >
               {focusedPhoto.caption}
             </span>
-            <span className="text-[10px] text-white/45">
+            <span className="text-[10px] text-white/45 tabular-nums">
               {focusedIndex + 1} / {photos.length}
             </span>
             <button
@@ -767,30 +706,102 @@ export function HudOverlay({
               className="p-1 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors cursor-pointer"
               title="下一张"
             >
-              <ChevronRight size={16} />
+              <ChevronRight size={15} />
             </button>
             <div className="w-px h-3.5 bg-white/15" />
             <button
               type="button"
               onClick={() => onSelectPhoto(null)}
-              className="text-xs text-white/65 hover:text-white px-1.5 cursor-pointer"
+              className="text-xs text-white/65 hover:text-white px-1 cursor-pointer"
             >
               收回
             </button>
           </div>
         )}
 
-        <div
-          className="px-4 py-1.5 rounded-full backdrop-blur-md text-[10px] sm:text-[11px] tracking-[0.2em] border text-center"
-          style={{
-            background: 'rgba(10, 14, 30, 0.52)',
-            borderColor: 'rgba(255, 255, 255, 0.1)',
-            color: 'rgba(255, 255, 255, 0.5)',
-          }}
+        {/* Signature Proposal C Floating Pill Trio */}
+        <nav
+          aria-label="主控制栏"
+          className="pointer-events-auto flex items-center justify-center gap-2.5 sm:gap-4"
         >
-          拖动旋转 · 滚轮缩放 · 点击拍立得放大查看 · 长按空白处让星光绽放
-        </div>
-      </div>
+          {/* Left Pill: Album */}
+          <button
+            type="button"
+            onClick={() => {
+              setAlbumOpen((v) => !v);
+              if (!albumOpen) setSettingsOpen(false);
+            }}
+            className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-full border backdrop-blur-xl text-xs sm:text-[13px] font-medium tracking-wide transition-all duration-300 hover:scale-[1.03] cursor-pointer shadow-lg"
+            style={
+              albumOpen
+                ? {
+                    background: `${accent}26`,
+                    borderColor: `${accent}aa`,
+                    color: accent,
+                    boxShadow: `0 0 22px ${accent}33`,
+                  }
+                : {
+                    background: 'rgba(18, 22, 38, 0.56)',
+                    borderColor: `${accent}48`,
+                    color: 'rgba(255, 244, 224, 0.88)',
+                  }
+            }
+          >
+            <ImageIcon size={15} />
+            <span>相册</span>
+            <span className="text-[10px] opacity-65 tabular-nums">{photos.length}</span>
+          </button>
+
+          {/* Center Primary Hero Pill: Bloom Starlight Toggle */}
+          <button
+            type="button"
+            onClick={onToggleBloom}
+            className="flex items-center gap-1.5 sm:gap-2 px-5 sm:px-7 py-2.5 sm:py-3 rounded-full border text-xs sm:text-sm font-semibold tracking-wider transition-all duration-300 hover:scale-[1.04] active:scale-[0.98] cursor-pointer"
+            style={
+              isBloomedVisual
+                ? {
+                    background: `linear-gradient(135deg, ${accent}, #fff2cc)`,
+                    borderColor: '#fff6de',
+                    color: '#181209',
+                    boxShadow: `0 0 32px ${accent}88, inset 0 1px 0 rgba(255,255,255,0.75)`,
+                  }
+                : {
+                    background: `linear-gradient(135deg, ${accent}e6, ${accent}b8)`,
+                    borderColor: `${accent}ff`,
+                    color: '#1a140a',
+                    boxShadow: `0 0 24px ${accent}52, inset 0 1px 0 rgba(255,255,255,0.55)`,
+                  }
+            }
+          >
+            <Sparkles size={15} className={isBloomedVisual ? 'animate-spin-slow' : ''} />
+            <span>{isBloomedVisual ? '聚拢星光' : '星光绽放'}</span>
+          </button>
+
+          {/* Right Pill: AI Gesture */}
+          <button
+            type="button"
+            onClick={onToggleHandTracking}
+            className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-full border backdrop-blur-xl text-xs sm:text-[13px] font-medium tracking-wide transition-all duration-300 hover:scale-[1.03] cursor-pointer shadow-lg"
+            style={
+              handTrackingEnabled
+                ? {
+                    background: `${accent}26`,
+                    borderColor: `${accent}aa`,
+                    color: accent,
+                    boxShadow: `0 0 22px ${accent}33`,
+                  }
+                : {
+                    background: 'rgba(18, 22, 38, 0.56)',
+                    borderColor: `${accent}48`,
+                    color: 'rgba(255, 244, 224, 0.88)',
+                  }
+            }
+          >
+            <Hand size={15} />
+            <span>{gestureButtonText}</span>
+          </button>
+        </nav>
+      </footer>
     </div>
   );
 }

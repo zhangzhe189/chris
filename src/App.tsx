@@ -35,6 +35,7 @@ export function App() {
 
   const [mode, setMode] = useState<TreeMode>('TREE');
   const [config, setConfig] = useState<SceneConfig>(() => createInitialConfig(isLite));
+  const [isBloomActive, setIsBloomActive] = useState(false);
 
   // Audio state (built-in music box by default, supports uploading local audio)
   const [isPlaying, setIsPlaying] = useState(true);
@@ -61,9 +62,11 @@ export function App() {
     source: 'mouse',
   });
   const bloomActiveRef = useRef(false);
-  const holdTimerRef = useRef<number | null>(null);
   const cursorElRef = useRef<HTMLDivElement | null>(null);
   const customAudioUrlRef = useRef<string | null>(null);
+
+  // Keep imperative ref synced with manual bloom toggle for zero-rerender 3D frame loop
+  bloomActiveRef.current = isBloomActive;
 
   const { audioMetricsRef, autoplayBlocked, unlockAudio } = useAudioEngine({
     isPlaying,
@@ -109,27 +112,18 @@ export function App() {
     };
   }, []);
 
-  // Escape key closes zoomed Polaroid; Spacebar holds starlight bloom
+  // Escape key closes zoomed Polaroid; Spacebar toggles starlight bloom
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setFocusedPhotoId(null);
       } else if (e.code === 'Space' && e.target === document.body) {
         e.preventDefault();
-        bloomActiveRef.current = true;
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        bloomActiveRef.current = false;
+        setIsBloomActive((prev) => !prev);
       }
     };
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   const galleryPhotos = useMemo<GalleryPhoto[]>(() => {
@@ -155,6 +149,10 @@ export function App() {
 
   const handleConfigPatch = useCallback((patch: Partial<SceneConfig>) => {
     setConfig((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const handleToggleBloom = useCallback(() => {
+    setIsBloomActive((prev) => !prev);
   }, []);
 
   const handlePhotoUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
@@ -267,23 +265,6 @@ export function App() {
     });
   }, []);
 
-  // Press-and-hold on the canvas (> 260ms) blooms starlight cleanly without interfering with photo clicks
-  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || handTrackingEnabled) return;
-    if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = window.setTimeout(() => {
-      bloomActiveRef.current = true;
-    }, 260);
-  };
-
-  const clearHoldBloom = () => {
-    if (holdTimerRef.current !== null) {
-      window.clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    bloomActiveRef.current = false;
-  };
-
   return (
     <div
       className="w-full h-screen text-white overflow-hidden relative"
@@ -295,6 +276,8 @@ export function App() {
         config={config}
         onConfigPatch={handleConfigPatch}
         onSelectTheme={handleSelectTheme}
+        isBloomActive={isBloomActive}
+        onToggleBloom={handleToggleBloom}
         isPlaying={isPlaying}
         onTogglePlay={() => setIsPlaying((p) => !p)}
         audioName={audioName}
@@ -321,13 +304,8 @@ export function App() {
         <HandTracker onHandUpdate={handleHandUpdate} accentColor={config.accentColor} />
       )}
 
-      <div
-        className="w-full h-full"
-        onPointerDown={handleCanvasPointerDown}
-        onPointerUp={clearHoldBloom}
-        onPointerCancel={clearHoldBloom}
-        onPointerLeave={clearHoldBloom}
-      >
+      {/* Pure 3D viewport: mouse/touch drag strictly rotates/zooms OrbitControls */}
+      <div className="w-full h-full">
         <Suspense
           fallback={
             <div
