@@ -294,7 +294,13 @@ export function HudOverlay({
   });
 
   return (
-    <div className="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between px-4 pt-4 pb-3 sm:px-7 sm:pt-6 sm:pb-5 md:px-9 md:pt-7 md:pb-6">
+    <div
+      className="fixed inset-0 pointer-events-none z-20 flex flex-col justify-between px-4 sm:px-7 md:px-9"
+      style={{
+        paddingTop: 'max(1rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.9rem, env(safe-area-inset-bottom))',
+      }}
+    >
       {/* Top Row: Two-line Magazine Editorial Title & Borderless Countdown | Unified 3-Icon Triad */}
       <header className="flex justify-between items-start gap-4">
         <div className="flex flex-col items-start pointer-events-none select-none">
@@ -844,7 +850,7 @@ export function HudOverlay({
       </div>
 
       {/* Bottom Area: On-demand Micro-Status, Unified Floating Frosted-Glass Dock & Poetic Tagline */}
-      <footer className="flex flex-col items-center gap-2.5 w-full pb-[env(safe-area-inset-bottom,0px)]">
+      <footer className="flex flex-col items-center gap-2 w-full">
         {/* On-demand audio unlock notice */}
         {autoplayBlocked && isPlaying && (
           <button
@@ -937,7 +943,7 @@ export function HudOverlay({
         {/* Unified Floating Frosted-Glass Dock */}
         <nav
           aria-label="主控制坞"
-          className="pointer-events-auto inline-flex items-center p-1 sm:p-1.5 rounded-full border backdrop-blur-2xl shadow-[0_14px_40px_rgba(0,0,0,0.45)]"
+          className="pointer-events-auto inline-flex items-center max-w-[calc(100vw-1.5rem)] p-1 sm:p-1.5 rounded-full border backdrop-blur-2xl shadow-[0_14px_40px_rgba(0,0,0,0.45)]"
           style={{
             background: ui.dockBg,
             borderColor: ui.dockBorder,
@@ -948,7 +954,7 @@ export function HudOverlay({
           <button
             type="button"
             onClick={() => togglePanel('album')}
-            className="flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-[13px] tracking-wide transition-all duration-300 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-[13px] whitespace-nowrap tracking-wide transition-all duration-300 cursor-pointer"
             style={{
               background: activePanel === 'album' ? `${accent}1e` : 'transparent',
               color: activePanel === 'album' ? ui.ivory : ui.textSecondary,
@@ -959,13 +965,13 @@ export function HudOverlay({
             <span className="text-[10px] opacity-55 tabular-nums">{photos.length}</span>
           </button>
 
-          <div className="w-px h-4 mx-0.5 sm:mx-1 bg-white/12" />
+          <div className="w-px h-4 mx-0.5 sm:mx-1 bg-white/12 shrink-0" />
 
           {/* Restrained Champagne-Glass Bloom Toggle */}
           <button
             type="button"
             onClick={onToggleBloom}
-            className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-5 py-1.5 sm:py-2 rounded-full border text-xs sm:text-[13px] font-medium tracking-wider transition-all duration-300 cursor-pointer"
+            className="flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full border text-xs sm:text-[13px] whitespace-nowrap font-medium tracking-wider transition-all duration-300 cursor-pointer"
             style={
               isBloomedVisual
                 ? {
@@ -991,13 +997,13 @@ export function HudOverlay({
             <span>{isBloomedVisual ? '聚拢星光' : '星光绽放'}</span>
           </button>
 
-          <div className="w-px h-4 mx-0.5 sm:mx-1 bg-white/12" />
+          <div className="w-px h-4 mx-0.5 sm:mx-1 bg-white/12 shrink-0" />
 
           {/* AI Gesture Action */}
           <button
             type="button"
             onClick={onToggleHandTracking}
-            className="flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-[13px] tracking-wide transition-all duration-300 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-[13px] whitespace-nowrap tracking-wide transition-all duration-300 cursor-pointer"
             style={{
               background: handTrackingEnabled ? `${accent}1e` : 'transparent',
               color: handTrackingEnabled ? ui.ivory : ui.textSecondary,

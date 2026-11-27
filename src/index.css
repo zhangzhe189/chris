@@ -8,7 +8,9 @@
     padding: 0;
     width: 100%;
     height: 100%;
+    height: 100dvh;
     overflow: hidden;
+    overscroll-behavior: none;
     background-color: #050913;
     font-family: 'Noto Serif SC', 'Cormorant Garamond', Georgia, serif;
     user-select: none;

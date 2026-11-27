@@ -303,7 +303,7 @@ export function App() {
 
   return (
     <div
-      className="w-full h-screen text-white overflow-hidden relative transition-colors duration-700"
+      className="fixed inset-0 w-full h-[100dvh] text-white overflow-hidden transition-colors duration-700"
       style={{ background: config.bgColor }}
     >
       <HudOverlay

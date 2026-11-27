@@ -316,7 +316,7 @@ export function ChristmasScene({
 
   return (
     <div
-      className="w-full h-screen relative transition-colors duration-700"
+      className="w-full h-full relative transition-colors duration-700"
       style={{ background: config.bgColor }}
       onPointerDown={(e) => {
         if (e.button === 0) {
