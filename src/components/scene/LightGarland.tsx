@@ -106,15 +106,17 @@ export function LightGarland({
       currentPos[idx + 2] += (tz - currentPos[idx + 2]) * lerpRate;
 
       const phase = phases[i];
-      const wave = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * 2.3 + phase));
-      const beat = 1 + audioLevel * 1.45 * (0.5 + 0.5 * Math.sin(time * 6 + phase * 3));
-      const intensity = wave * beat * 1.25;
+      // Flowing continuous shimmer travelling slowly up the slender spiral
+      const travelWave = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * 1.55 - (i / count) * 14 + phase * 0.35));
+      const beat = 1 + audioLevel * 1.05 * (0.5 + 0.5 * Math.sin(time * 5 + phase * 2));
+      const intensity = travelWave * beat * 1.06;
 
       const base = palette[paletteIdx[i]];
       tempColor.setRGB(base.r * intensity, base.g * intensity, base.b * intensity);
       mesh.setColorAt(i, tempColor);
 
-      const scale = 0.105 * (1 + audioLevel * 0.55 * (0.5 + 0.5 * Math.sin(time * 6 + phase)));
+      // Slender delicate light beads
+      const scale = 0.068 * (1 + audioLevel * 0.42 * (0.5 + 0.5 * Math.sin(time * 5 + phase)));
       dummy.position.set(currentPos[idx], currentPos[idx + 1], currentPos[idx + 2]);
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();

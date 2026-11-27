@@ -1,12 +1,14 @@
 export type TreeMode = 'TREE' | 'FLOAT';
 
+/** Independent scene state reserved for Phase 3 Quiet <-> Ordered Orbital Bloom */
+export type SceneState = 'QUIET' | 'BLOOM';
+
 export type GestureType = 'IDLE' | 'HOVER' | 'OPEN' | 'PINCH';
 
-export type ThemeId =
-  | 'midnight-gold'
-  | 'obsidian-gold'
-  | 'aurora-ice'
-  | 'classic-pine';
+export type AppearanceId = 'midnight-glow' | 'vintage-noel' | 'memory-galaxy';
+
+/** @deprecated Alias kept for backward compatibility during incremental upgrades */
+export type ThemeId = AppearanceId;
 
 export interface HandData {
   x: number;
@@ -25,8 +27,111 @@ export interface AudioMetrics {
   level: number;
 }
 
+export interface AppearanceSpaceConfig {
+  /** Far layer: deep sky zenith & horizon colors + slow stardust */
+  skyZenith: string;
+  skyHorizon: string;
+  farDustColor1: string;
+  farDustColor2: string;
+  farDustSpeed: number;
+  farDustOpacity: number;
+  /** Midground layer: soft breathing atmospheric mist / nebula */
+  nebulaPrimary: string;
+  nebulaSecondary: string;
+  nebulaWarmCore: string;
+  nebulaOpacity: number;
+  nebulaDriftSpeed: number;
+  nebulaBreathSpeed: number;
+  /** Foreground layer: fine snow + defocused near bokeh */
+  snowColor: string;
+  bokehWarmColor: string;
+  snowFallMultiplier: number;
+  /** Ground layer: elliptical feathered halo & scattered ground shimmer */
+  groundCoreColor: string;
+  groundMidColor: string;
+  groundEmberColor: string;
+  groundGlowOpacity: number;
+}
+
+export interface AppearanceLightingConfig {
+  ambientIntensity: number;
+  keyColor: string;
+  keyIntensity: number;
+  rimColor: string;
+  rimIntensity: number;
+  envWarmColor: string;
+  envCoolColor: string;
+  exposure: number;
+  fogColor: string;
+  fogNear: number;
+  fogFar: number;
+  bloomThreshold: number;
+  bloomIntensity: number;
+  bloomRadius: number;
+  vignetteDarkness: number;
+}
+
+export interface AppearanceUIConfig {
+  glassBg: string;
+  glassBorder: string;
+  dockBg: string;
+  dockBorder: string;
+  textPrimary: string;
+  textSecondary: string;
+  accent: string;
+  ivory: string;
+  velvetAccent: string;
+  bloomIdleBg: string;
+  bloomIdleBorder: string;
+  bloomActiveBg: string;
+  bloomActiveBorder: string;
+}
+
+export interface AppearanceMotionConfig {
+  treeRotationSpeed: number;
+  garlandFlowSpeed: number;
+  twinkleIntensity: number;
+}
+
+export interface AppearanceConfig {
+  id: AppearanceId;
+  name: string;
+  englishName: string;
+  tagline: string;
+  /** False for appearances scheduled in Phase 2 so the UI shows upcoming cards gracefully */
+  available: boolean;
+  previewGradient: string;
+  swatches: [string, string, string, string, string];
+  space: AppearanceSpaceConfig;
+  lighting: AppearanceLightingConfig;
+  ui: AppearanceUIConfig;
+  motion: AppearanceMotionConfig;
+  defaults: {
+    bgColor: string;
+    accentColor: string;
+    particleColor1: string;
+    particleColor2: string;
+    starColor: string;
+    garlandColors: [string, string, string];
+    boxColor1: string;
+    boxColor2: string;
+    ribbonColor: string;
+    bellColor: string;
+    boxCountDesktop: number;
+    boxCountLite: number;
+    bellCountDesktop: number;
+    bellCountLite: number;
+    particleCountDesktop: number;
+    particleCountLite: number;
+    boxMetalness: number;
+    boxRoughness: number;
+    bellMetalness: number;
+    bellRoughness: number;
+  };
+}
+
 export interface SceneConfig {
-  themeId: ThemeId;
+  appearanceId: AppearanceId;
   bgColor: string;
   accentColor: string;
   particleCount: number;
@@ -42,14 +147,6 @@ export interface SceneConfig {
   snowGroundColor: string;
   ringColor: string;
   starColor: string;
-}
-
-export interface ThemePreset {
-  id: ThemeId;
-  name: string;
-  subtitle: string;
-  swatch: [string, string, string];
-  colors: Omit<SceneConfig, 'themeId' | 'particleCount' | 'boxCount' | 'bellCount'>;
 }
 
 export interface GalleryPhoto {

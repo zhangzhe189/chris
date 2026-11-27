@@ -112,9 +112,9 @@ export function StarlightTree({
       explosion[i * 3 + 1] = dir.y;
       explosion[i * 3 + 2] = dir.z;
 
-      twinkleSpeed[i] = 1.5 + Math.random() * 3.5;
+      twinkleSpeed[i] = 1.2 + Math.random() * 2.8;
       twinklePhase[i] = Math.random() * Math.PI * 2;
-      baseSizes[i] = 0.042 + Math.pow(Math.random(), 2.2) * 0.068;
+      baseSizes[i] = 0.032 + Math.pow(Math.random(), 2.4) * 0.052;
       colorMix[i] = Math.random();
     }
 
@@ -145,8 +145,8 @@ export function StarlightTree({
       } else {
         temp.copy(c2).lerp(c1, (1 - m) * 0.4);
       }
-      // Gentle HDR lift so Bloom catches highlights softly
-      const lift = 1.1 + (i % 7 === 0 ? 0.45 : 0.12);
+      // Restrained HDR lift for fine cinema-grade sparkle without harsh blowout
+      const lift = 0.94 + (i % 8 === 0 ? 0.38 : 0.1);
       temp.multiplyScalar(lift);
       mesh.setColorAt(i, temp);
     }
@@ -236,9 +236,9 @@ export function StarlightTree({
         <meshStandardMaterial
           color={starColor}
           emissive={starColor}
-          emissiveIntensity={1.65}
-          metalness={0.88}
-          roughness={0.14}
+          emissiveIntensity={1.25}
+          metalness={0.85}
+          roughness={0.18}
           toneMapped={false}
         />
       </mesh>

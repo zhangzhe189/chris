@@ -1,18 +1,27 @@
 import { useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, Lightformer, OrbitControls, Stars } from '@react-three/drei';
+import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import type { AudioMetrics, GalleryPhoto, HandData, SceneConfig, TreeMode } from '../../types';
+import type {
+  AppearanceConfig,
+  AudioMetrics,
+  GalleryPhoto,
+  HandData,
+  SceneConfig,
+  TreeMode,
+} from '../../types';
 import { StarlightTree } from './StarlightTree';
 import { Ornaments } from './Ornaments';
 import { LightGarland } from './LightGarland';
+import { AtmosphereSpace } from './AtmosphereSpace';
 import { SnowAndGround } from './SnowAndGround';
 import { PhotoGallery3D } from './PhotoGallery3D';
 
 interface ChristmasSceneProps {
   mode: TreeMode;
+  appearance: AppearanceConfig;
   config: SceneConfig;
   photos: GalleryPhoto[];
   audioMetricsRef: MutableRefObject<AudioMetrics>;
@@ -25,6 +34,7 @@ interface ChristmasSceneProps {
 
 interface RotatingTreeAssemblyProps {
   mode: TreeMode;
+  appearance: AppearanceConfig;
   config: SceneConfig;
   photos: GalleryPhoto[];
   audioMetricsRef: MutableRefObject<AudioMetrics>;
@@ -37,6 +47,7 @@ interface RotatingTreeAssemblyProps {
 
 function RotatingTreeAssembly({
   mode,
+  appearance,
   config,
   photos,
   audioMetricsRef,
@@ -51,7 +62,7 @@ function RotatingTreeAssembly({
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05);
     if (groupRef.current && mode === 'TREE' && !focusedPhotoId) {
-      groupRef.current.rotation.y += delta * 0.13;
+      groupRef.current.rotation.y += delta * appearance.motion.treeRotationSpeed;
     }
   });
 
@@ -78,6 +89,10 @@ function RotatingTreeAssembly({
         boxColor2={config.boxColor2}
         ribbonColor={config.ribbonColor}
         bellColor={config.bellColor}
+        boxMetalness={appearance.defaults.boxMetalness}
+        boxRoughness={appearance.defaults.boxRoughness}
+        bellMetalness={appearance.defaults.bellMetalness}
+        bellRoughness={appearance.defaults.bellRoughness}
       />
       <LightGarland
         mode={mode}
@@ -85,7 +100,7 @@ function RotatingTreeAssembly({
         handDataRef={handDataRef}
         bloomActiveRef={bloomActiveRef}
         colors={config.garlandColors}
-        count={isLite ? 120 : 240}
+        count={isLite ? 150 : 300}
       />
       <PhotoGallery3D
         photos={photos}
@@ -100,6 +115,7 @@ function RotatingTreeAssembly({
 
 export function ChristmasScene({
   mode,
+  appearance,
   config,
   photos,
   audioMetricsRef,
@@ -109,14 +125,16 @@ export function ChristmasScene({
   onSelectPhoto,
   isLite,
 }: ChristmasSceneProps) {
+  const { lighting, space } = appearance;
+
   return (
     <div className="w-full h-screen relative" style={{ background: config.bgColor }}>
       <Canvas
-        camera={{ position: [0, 1.4, 22], fov: 45 }}
+        camera={{ position: [0, 1.35, 22.5], fov: 44 }}
         gl={{
           antialias: isLite,
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.12,
+          toneMappingExposure: lighting.exposure,
           powerPreference: 'high-performance',
         }}
         dpr={isLite ? [1, 1.5] : [1, 2]}
@@ -125,53 +143,63 @@ export function ChristmasScene({
         }}
       >
         <color attach="background" args={[config.bgColor]} />
-        <fog attach="fog" args={[config.bgColor, 16, 56]} />
+        <fog attach="fog" args={[lighting.fogColor, lighting.fogNear, lighting.fogFar]} />
 
-        <ambientLight intensity={0.42} />
-        <directionalLight position={[-12, 14, -8]} intensity={0.55} color="#9fb8ff" />
+        {/* Cinematic layered lighting */}
+        <ambientLight intensity={lighting.ambientIntensity} />
+        <directionalLight
+          position={[-12, 15, -9]}
+          intensity={lighting.rimIntensity}
+          color={lighting.rimColor}
+        />
         <pointLight
-          position={[10, 4, 10]}
-          intensity={14}
-          distance={42}
+          position={[11, 5, 11]}
+          intensity={lighting.keyIntensity}
+          distance={44}
           decay={2}
-          color="#ffb17a"
+          color={lighting.keyColor}
         />
 
         <Environment resolution={256}>
           <group>
             <Lightformer
-              intensity={3}
-              position={[0, 5, 9]}
+              intensity={2.4}
+              position={[0, 5, 10]}
               scale={[10, 6, 1]}
-              color="#ffd9a0"
+              color={lighting.envWarmColor}
             />
             <Lightformer
-              intensity={1.3}
-              position={[-8, 3, -6]}
+              intensity={1.15}
+              position={[-9, 3, -6]}
               rotation-y={Math.PI / 3}
-              scale={[6, 4, 1]}
-              color="#8fb4ff"
+              scale={[7, 5, 1]}
+              color={lighting.envCoolColor}
             />
             <Lightformer
-              intensity={0.9}
-              position={[0, 9, 0]}
+              intensity={0.7}
+              position={[0, 10, 0]}
               rotation-x={Math.PI / 2}
               scale={[8, 8, 1]}
-              color="#fff4e0"
+              color="#f5e8cf"
             />
             <Lightformer
-              intensity={0.5}
+              intensity={0.45}
               position={[0, -6, 0]}
               rotation-x={-Math.PI / 2}
               scale={[10, 10, 1]}
-              color="#38507a"
+              color={space.skyHorizon}
             />
           </group>
         </Environment>
 
+        {/* Layers 1 & 2: Far sky dome + slow stardust + midground breathing mist */}
+        <AtmosphereSpace space={space} isLite={isLite} />
+
+        {/* Hero 3D Tree Assembly */}
         <group rotation={[0, -Math.PI / 4, 0]}>
           <RotatingTreeAssembly
             mode={mode}
+            appearance={appearance}
             config={config}
             photos={photos}
             audioMetricsRef={audioMetricsRef}
@@ -183,31 +211,23 @@ export function ChristmasScene({
           />
         </group>
 
+        {/* Layers 3 & 4: Dual-depth parallax snow/bokeh + feathered elliptical ground halo & embers */}
         <SnowAndGround
-          snowCount={isLite ? 420 : 1400}
-          groundColor={config.snowGroundColor}
-          ringColor={config.ringColor}
+          space={space}
+          groundCoreColor={config.ringColor}
+          isLite={isLite}
         />
 
-        <Stars
-          radius={110}
-          depth={50}
-          count={isLite ? 1400 : 3800}
-          factor={3.6}
-          saturation={0.15}
-          fade
-          speed={0.6}
-        />
-
+        {/* Restrained filmic bloom & subtle vignette (skipped gracefully in lite mode) */}
         {!isLite && (
           <EffectComposer enableNormalPass={false}>
             <Bloom
-              luminanceThreshold={0.34}
+              luminanceThreshold={lighting.bloomThreshold}
               mipmapBlur
-              intensity={0.82}
-              radius={0.64}
+              intensity={lighting.bloomIntensity}
+              radius={lighting.bloomRadius}
             />
-            <Vignette eskil={false} offset={0.18} darkness={0.78} />
+            <Vignette eskil={false} offset={0.22} darkness={lighting.vignetteDarkness} />
           </EffectComposer>
         )}
 
@@ -219,7 +239,7 @@ export function ChristmasScene({
           minDistance={8.5}
           maxPolarAngle={Math.PI * 0.56}
           enableDamping
-          dampingFactor={0.06}
+          dampingFactor={0.055}
         />
       </Canvas>
     </div>

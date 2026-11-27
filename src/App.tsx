@@ -1,6 +1,11 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { createInitialConfig, getThemePreset } from './config/themes';
+import {
+  createSceneConfigFromAppearance,
+  getAppearance,
+  loadSavedAppearanceId,
+  saveAppearanceId,
+} from './config/appearances';
 import { DEFAULT_POSTCARDS } from './utils/defaultPostcards';
 import {
   compressImageBlob,
@@ -17,11 +22,11 @@ import { ChristmasScene } from './components/scene/ChristmasScene';
 import { HudOverlay } from './components/HudOverlay';
 import { HandTracker } from './components/HandTracker';
 import type {
+  AppearanceId,
   GalleryPhoto,
   GestureType,
   HandData,
   SceneConfig,
-  ThemeId,
   TreeMode,
 } from './types';
 
@@ -33,8 +38,13 @@ function detectLiteMode(): boolean {
 export function App() {
   const isLite = useMemo(() => detectLiteMode(), []);
 
+  const [appearanceId, setAppearanceId] = useState<AppearanceId>(() => loadSavedAppearanceId());
+  const appearance = useMemo(() => getAppearance(appearanceId), [appearanceId]);
+
   const [mode, setMode] = useState<TreeMode>('TREE');
-  const [config, setConfig] = useState<SceneConfig>(() => createInitialConfig(isLite));
+  const [config, setConfig] = useState<SceneConfig>(() =>
+    createSceneConfigFromAppearance(getAppearance(loadSavedAppearanceId()), isLite)
+  );
   const [isBloomActive, setIsBloomActive] = useState(false);
 
   // Audio state (built-in music box by default, supports uploading local audio)
@@ -73,7 +83,7 @@ export function App() {
     customAudioUrl,
   });
 
-  // Load persisted photos from IndexedDB on mount
+  // Load persisted photos from IndexedDB on mount (never wipes user data)
   useEffect(() => {
     let active = true;
     const createdUrls: string[] = [];
@@ -138,14 +148,21 @@ export function App() {
     }
   }, [focusedPhotoId, galleryPhotos]);
 
-  const handleSelectTheme = useCallback((themeId: ThemeId) => {
-    const preset = getThemePreset(themeId);
-    setConfig((prev) => ({
-      ...prev,
-      themeId: preset.id,
-      ...preset.colors,
-    }));
-  }, []);
+  const handleSelectAppearance = useCallback(
+    (nextId: AppearanceId) => {
+      const next = getAppearance(nextId);
+      setAppearanceId(next.id);
+      saveAppearanceId(next.id);
+      setConfig((prev) => ({
+        ...createSceneConfigFromAppearance(next, isLite),
+        // Preserve user's customized density sliders when switching appearances
+        particleCount: prev.particleCount,
+        boxCount: prev.boxCount,
+        bellCount: prev.bellCount,
+      }));
+    },
+    [isLite]
+  );
 
   const handleConfigPatch = useCallback((patch: Partial<SceneConfig>) => {
     setConfig((prev) => ({ ...prev, ...patch }));
@@ -273,9 +290,10 @@ export function App() {
       <HudOverlay
         mode={mode}
         onModeChange={setMode}
+        appearance={appearance}
+        onSelectAppearance={handleSelectAppearance}
         config={config}
         onConfigPatch={handleConfigPatch}
-        onSelectTheme={handleSelectTheme}
         isBloomActive={isBloomActive}
         onToggleBloom={handleToggleBloom}
         isPlaying={isPlaying}
@@ -309,15 +327,16 @@ export function App() {
         <Suspense
           fallback={
             <div
-              className="absolute inset-0 flex items-center justify-center font-display italic text-lg tracking-widest animate-pulse"
-              style={{ color: config.accentColor }}
+              className="absolute inset-0 flex items-center justify-center font-editorial italic text-xl tracking-[0.16em] animate-pulse"
+              style={{ color: appearance.ui.ivory }}
             >
-              Lighting up the Christmas Tree...
+              Entering Christmas Wonderland...
             </div>
           }
         >
           <ChristmasScene
             mode={mode}
+            appearance={appearance}
             config={config}
             photos={galleryPhotos}
             audioMetricsRef={audioMetricsRef}

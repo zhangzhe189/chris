@@ -16,6 +16,10 @@ interface OrnamentsProps {
   boxColor2: string;
   ribbonColor: string;
   bellColor: string;
+  boxMetalness?: number;
+  boxRoughness?: number;
+  bellMetalness?: number;
+  bellRoughness?: number;
 }
 
 interface OrnamentItem {
@@ -74,6 +78,10 @@ export function Ornaments({
   boxColor2,
   ribbonColor,
   bellColor,
+  boxMetalness = 0.36,
+  boxRoughness = 0.42,
+  bellMetalness = 0.9,
+  bellRoughness = 0.16,
 }: OrnamentsProps) {
   const boxMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const ribbonAMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -81,8 +89,9 @@ export function Ornaments({
   const bellMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  const boxes = useMemo(() => generateItems(boxCount, 0.24, 0.26), [boxCount]);
-  const bells = useMemo(() => generateItems(bellCount, 0.19, 0.18), [bellCount]);
+  // Refined, jewel-sized gifts and baubles that preserve the tree silhouette
+  const boxes = useMemo(() => generateItems(boxCount, 0.17, 0.14), [boxCount]);
+  const bells = useMemo(() => generateItems(bellCount, 0.14, 0.12), [bellCount]);
 
   useLayoutEffect(() => {
     const mesh = boxMeshRef.current;
@@ -197,23 +206,27 @@ export function Ornaments({
             frustumCulled={false}
           >
             <boxGeometry args={[1, 0.92, 1]} />
-            <meshStandardMaterial metalness={0.5} roughness={0.26} envMapIntensity={1.5} />
+            <meshStandardMaterial
+              metalness={boxMetalness}
+              roughness={boxRoughness}
+              envMapIntensity={1.2}
+            />
           </instancedMesh>
-          {/* Golden cross-ribbons wrapping each gift box */}
+          {/* Delicate champagne-gold cross-ribbons wrapping each gift box */}
           <instancedMesh
             key={`gift-ribbon-a-${boxCount}`}
             ref={ribbonAMeshRef}
             args={[undefined, undefined, boxCount]}
             frustumCulled={false}
           >
-            <boxGeometry args={[1.04, 0.96, 0.19]} />
+            <boxGeometry args={[1.03, 0.95, 0.15]} />
             <meshStandardMaterial
               color={ribbonColor}
               emissive={ribbonColor}
-              emissiveIntensity={0.22}
-              metalness={0.92}
-              roughness={0.18}
-              envMapIntensity={2.0}
+              emissiveIntensity={0.14}
+              metalness={0.88}
+              roughness={0.22}
+              envMapIntensity={1.6}
             />
           </instancedMesh>
           <instancedMesh
@@ -222,14 +235,14 @@ export function Ornaments({
             args={[undefined, undefined, boxCount]}
             frustumCulled={false}
           >
-            <boxGeometry args={[0.19, 0.96, 1.04]} />
+            <boxGeometry args={[0.15, 0.95, 1.03]} />
             <meshStandardMaterial
               color={ribbonColor}
               emissive={ribbonColor}
-              emissiveIntensity={0.22}
-              metalness={0.92}
-              roughness={0.18}
-              envMapIntensity={2.0}
+              emissiveIntensity={0.14}
+              metalness={0.88}
+              roughness={0.22}
+              envMapIntensity={1.6}
             />
           </instancedMesh>
         </>
@@ -242,8 +255,12 @@ export function Ornaments({
           args={[undefined, undefined, bellCount]}
           frustumCulled={false}
         >
-          <sphereGeometry args={[0.58, 16, 16]} />
-          <meshStandardMaterial metalness={0.95} roughness={0.12} envMapIntensity={2.2} />
+          <sphereGeometry args={[0.56, 16, 16]} />
+          <meshStandardMaterial
+            metalness={bellMetalness}
+            roughness={bellRoughness}
+            envMapIntensity={1.85}
+          />
         </instancedMesh>
       )}
     </group>
